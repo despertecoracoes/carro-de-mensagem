@@ -1,0 +1,6 @@
+{
+  "name": "Desperte Corações — Agendamento e Atendimento ao Vivo",
+  "description": "Plataforma completa para carro de mensagem ao vivo: site de agendamento automático com horários em tempo real e centro de atendimento com mensagens prontas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

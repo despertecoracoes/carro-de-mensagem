@@ -1,0 +1,161 @@
+import { GiftOption, OccasionType, TemplateCategory } from '../types/booking';
+
+export const STANDARD_TIME_SLOTS = [
+  '09:00',
+  '10:30',
+  '12:00',
+  '14:00',
+  '15:30',
+  '17:00',
+  '18:00',
+  '19:30',
+  '21:00',
+];
+
+export const OCCASIONS: {
+  value: OccasionType;
+  label: string;
+  summary: string;
+}[] = [
+  {
+    value: 'Aniversário',
+    label: 'Aniversário',
+    summary: 'Celebração festiva com parabéns ao vivo e homenagem personalizada.',
+  },
+  {
+    value: 'Reconciliação',
+    label: 'Reconciliação',
+    summary: 'Mensagem sensível e respeitosa para reaproximar com emoção.',
+  },
+  {
+    value: 'Declaração de Amor',
+    label: 'Declaração de Amor',
+    summary: 'Surpresa romântica com trilha sonora escolhida pelo casal.',
+  },
+  {
+    value: 'Homenagem Especial',
+    label: 'Homenagem Especial',
+    summary: 'Dia das Mães, formatura, boas-vindas ou agradecimento especial.',
+  },
+];
+
+export interface NeighborhoodZone {
+  id: string;
+  label: string;
+  basePrice: number;
+}
+
+export const MINIMUM_BASE_PRICE = 250;
+
+export const NEIGHBORHOOD_ZONES: NeighborhoodZone[] = [
+  {
+    id: 'ipsep',
+    label: 'Ipsep (Ponto de saída — preço mínimo)',
+    basePrice: 250,
+  },
+  {
+    id: 'ibura-baixo',
+    label: 'Ibura de Baixo / Imbiribeira / Areias / Jordão Baixo',
+    basePrice: 260,
+  },
+  {
+    id: 'recife-centro-sul',
+    label: 'São José / Boa Viagem / Afogados / Boa Vista / Pina',
+    basePrice: 270,
+  },
+  {
+    id: 'recife-norte-oeste-proximo',
+    label: 'Madalena / Torre / Graças / Espinheiro / Tejipió / Coqueiral',
+    basePrice: 280,
+  },
+  {
+    id: 'ur11-cohab-piedade',
+    label: 'UR-11 / Cohab / Ibura de Cima / Piedade / Casa Amarela',
+    basePrice: 290,
+  },
+  {
+    id: 'varzea-candeias-olinda',
+    label: 'Várzea / Caxangá / Candeias / Barra de Jangada / Olinda Sul',
+    basePrice: 310,
+  },
+  {
+    id: 'rmr-distante',
+    label: 'Olinda Norte / Camaragibe / Paulista / Prazeres Distante',
+    basePrice: 330,
+  },
+];
+
+export const GIFT_OPTIONS: {
+  value: GiftOption;
+  label: string;
+  price: number;
+  description: string;
+}[] = [
+  {
+    value: 'champanhe',
+    label: 'Champanhe (Espumante)',
+    price: 0,
+    description: 'Já incluso no pacote! Espumante gelado para celebrar na homenagem.',
+  },
+  {
+    value: 'chocolate',
+    label: 'Caixa de Chocolates Finos',
+    price: 0,
+    description: 'Já incluso no pacote! Caixa artesanal de chocolates entregue na hora.',
+  },
+  {
+    value: 'ambos',
+    label: 'Levar os dois (Champanhe + Chocolate)',
+    price: 65,
+    description: 'O primeiro mimo já é incluso; adicional referente apenas ao segundo item.',
+  },
+  {
+    value: 'nenhum',
+    label: 'Não preciso de brinde',
+    price: 0,
+    description: 'Apenas a apresentação completa do carro com locução e 3 músicas.',
+  },
+];
+
+export const FIREWORKS_PRICE = 0;
+
+export const INCLUDED_FIREWORKS = [
+  '1x Fogos 12x1',
+  'Chuva de Prata',
+  'Árvore de Natal (Vulcão)',
+];
+
+export const TEMPLATE_CATEGORIES: TemplateCategory[] = [
+  'Boas-vindas e Triagem',
+  'Endereço e Orçamento',
+  'Pacotes e Opcionais',
+  'Dúvidas Frequentes',
+  'Fechamento e Pix',
+  'Confirmação e Rota',
+];
+
+export function formatBRL(value: number): string {
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+}
+
+export function calculatePrices(
+  neighborhoodLabel: string,
+  giftOption: GiftOption,
+  includeFireworks: boolean
+): { basePrice: number; extrasPrice: number; totalPrice: number } {
+  const matchedZone = NEIGHBORHOOD_ZONES.find(
+    (z) => z.label === neighborhoodLabel || z.id === neighborhoodLabel
+  );
+  const basePrice = matchedZone ? matchedZone.basePrice : MINIMUM_BASE_PRICE;
+  const giftPrice = GIFT_OPTIONS.find((g) => g.value === giftOption)?.price ?? 0;
+  const fireworksPrice = includeFireworks ? FIREWORKS_PRICE : 0;
+  const extrasPrice = giftPrice + fireworksPrice;
+  return {
+    basePrice,
+    extrasPrice,
+    totalPrice: basePrice + extrasPrice,
+  };
+}

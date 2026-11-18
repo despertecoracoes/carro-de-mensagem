@@ -1,0 +1,213 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdminEmail() {
+      return isVerifiedUser() && request.auth.token.email == 'taviinhobr777@gmail.com';
+    }
+
+    function isAdmin() {
+      return isAdminEmail() || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // --- Entity Validation Blueprints ---
+    function isValidSlot(data) {
+      return data.keys().hasAll(['date', 'time', 'status', 'createdByUid', 'updatedAt'])
+        && data.keys().hasOnly(['date', 'time', 'status', 'bookingId', 'createdByUid', 'updatedAt'])
+        && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.time is string && data.time.size() == 5 && data.time.matches('^\\d{2}:\\d{2}$')
+        && data.status is string && data.status.size() <= 16 && data.status in ['booked', 'blocked']
+        && data.createdByUid is string && data.createdByUid.size() > 0 && data.createdByUid.size() <= 128
+        && data.updatedAt is timestamp
+        && (!('bookingId' in data) || (data.bookingId is string && isValidId(data.bookingId)));
+    }
+
+    function isValidBooking(data) {
+      return data.keys().hasAll([
+          'ownerUid', 'slotId', 'protocol', 'date', 'time', 'occasion',
+          'honoreeName', 'honoreeAge', 'clientName', 'clientWhatsapp',
+          'neighborhood', 'streetAddress', 'propertyType', 'referencePoint',
+          'giftOption', 'includeFireworks', 'songs', 'messageSource',
+          'customMessage', 'generatedScript', 'basePrice', 'extrasPrice',
+          'totalPrice', 'status', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerUid', 'slotId', 'protocol', 'date', 'time', 'occasion',
+          'honoreeName', 'honoreeAge', 'clientName', 'clientWhatsapp',
+          'neighborhood', 'streetAddress', 'propertyType', 'referencePoint',
+          'giftOption', 'includeFireworks', 'songs', 'messageSource',
+          'customMessage', 'generatedScript', 'basePrice', 'extrasPrice',
+          'totalPrice', 'status', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128
+        && data.slotId is string && isValidId(data.slotId) && data.slotId.matches('^\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}$')
+        && data.protocol is string && data.protocol.size() >= 3 && data.protocol.size() <= 32
+        && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.time is string && data.time.size() == 5 && data.time.matches('^\\d{2}:\\d{2}$')
+        && data.occasion is string && data.occasion.size() <= 40 && data.occasion in ['Aniversário', 'Reconciliação', 'Declaração de Amor', 'Homenagem Especial']
+        && data.honoreeName is string && data.honoreeName.size() >= 1 && data.honoreeName.size() <= 120
+        && data.honoreeAge is string && data.honoreeAge.size() <= 40
+        && data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 120
+        && data.clientWhatsapp is string && data.clientWhatsapp.size() >= 8 && data.clientWhatsapp.size() <= 30
+        && data.neighborhood is string && data.neighborhood.size() >= 1 && data.neighborhood.size() <= 140
+        && data.streetAddress is string && data.streetAddress.size() >= 1 && data.streetAddress.size() <= 200
+        && data.propertyType is string && data.propertyType.size() <= 20 && data.propertyType in ['Casa', 'Prédio', 'Comércio']
+        && data.referencePoint is string && data.referencePoint.size() <= 200
+        && data.giftOption is string && data.giftOption.size() <= 20 && data.giftOption in ['champanhe', 'chocolate', 'ambos', 'nenhum']
+        && data.includeFireworks is bool
+        && data.songs is list && data.songs.size() == 3
+        && data.songs[0] is string && data.songs[0].size() >= 1 && data.songs[0].size() <= 160
+        && data.songs[1] is string && data.songs[1].size() >= 1 && data.songs[1].size() <= 160
+        && data.songs[2] is string && data.songs[2].size() >= 1 && data.songs[2].size() <= 160
+        && data.messageSource is string && data.messageSource.size() <= 20 && data.messageSource in ['cliente', 'empresa']
+        && data.customMessage is string && data.customMessage.size() <= 2000
+        && data.generatedScript is string && data.generatedScript.size() <= 3000
+        && data.basePrice is number && data.basePrice >= 0 && data.basePrice <= 10000
+        && data.extrasPrice is number && data.extrasPrice >= 0 && data.extrasPrice <= 10000
+        && data.totalPrice is number && data.totalPrice >= 0 && data.totalPrice <= 20000
+        && data.status is string && data.status.size() <= 20 && data.status in ['Pendente', 'Confirmado', 'Em Rota', 'Concluído', 'Cancelado']
+        && data.notes is string && data.notes.size() <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTemplate(data) {
+      return data.keys().hasAll(['title', 'category', 'content', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'category', 'content', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.category is string && data.category.size() <= 40 && data.category in [
+          'Boas-vindas e Triagem',
+          'Endereço e Orçamento',
+          'Pacotes e Opcionais',
+          'Dúvidas Frequentes',
+          'Fechamento e Pix',
+          'Confirmação e Rota'
+        ]
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 3000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'createdAt'])
+        && data.keys().hasOnly(['email', 'createdAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Public availability slots (Zero PII)
+    match /slots/{slotId} {
+      allow get: if isValidId(slotId);
+      allow list: if true;
+
+      allow create: if isVerifiedUser()
+        && isValidId(slotId)
+        && isValidSlot(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().updatedAt == request.time
+        && (
+          (
+            incoming().status == 'booked'
+            && ('bookingId' in incoming())
+            && existsAfter(/databases/$(database)/documents/bookings/$(incoming().bookingId))
+            && getAfter(/databases/$(database)/documents/bookings/$(incoming().bookingId)).data.slotId == slotId
+            && getAfter(/databases/$(database)/documents/bookings/$(incoming().bookingId)).data.ownerUid == request.auth.uid
+          )
+          || (isAdmin() && incoming().status == 'blocked' && !('bookingId' in incoming()))
+        );
+
+      allow update: if false;
+      allow delete: if isAdmin() && isValidId(slotId);
+    }
+
+    // 2. Bookings (Contains PII - strictly isolated to owner or admin)
+    match /bookings/{bookingId} {
+      allow get: if isValidId(bookingId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdminEmail() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(bookingId)
+        && isValidBooking(incoming())
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (isAdmin() || incoming().status == 'Pendente')
+        && !exists(/databases/$(database)/documents/slots/$(incoming().slotId))
+        && existsAfter(/databases/$(database)/documents/slots/$(incoming().slotId))
+        && getAfter(/databases/$(database)/documents/slots/$(incoming().slotId)).data.bookingId == bookingId
+        && getAfter(/databases/$(database)/documents/slots/$(incoming().slotId)).data.date == incoming().date
+        && getAfter(/databases/$(database)/documents/slots/$(incoming().slotId)).data.time == incoming().time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(bookingId)
+        && isValidBooking(incoming())
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().slotId == existing().slotId
+        && incoming().updatedAt == request.time
+        && ((existing().status != 'Cancelado' && existing().status != 'Concluído') || isAdmin())
+        && (
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'generatedScript', 'notes', 'customMessage', 'updatedAt']))
+          || (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['customMessage', 'notes', 'updatedAt']))
+        );
+
+      allow delete: if isAdmin() && isValidId(bookingId);
+    }
+
+    // 3. Quick-reply templates (Admin only)
+    match /templates/{templateId} {
+      allow get: if isValidId(templateId) && isAdmin();
+      allow list: if isAdminEmail();
+
+      allow create: if isAdmin()
+        && isValidId(templateId)
+        && isValidTemplate(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(templateId)
+        && isValidTemplate(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'content', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(templateId);
+    }
+
+    // 4. Admins lookup
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && isAdmin();
+      allow list: if isAdminEmail();
+      allow create, update: if isAdminEmail()
+        && isValidId(adminUid)
+        && isValidAdminUser(incoming())
+        && incoming().createdAt == request.time;
+      allow delete: if isAdminEmail() && isValidId(adminUid);
+    }
+  }
+}
