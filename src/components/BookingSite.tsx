@@ -3,6 +3,7 @@ import {
   Calendar,
   Check,
   Clock,
+  ExternalLink,
   Flame,
   Gift,
   Heart,
@@ -10,12 +11,16 @@ import {
   Music,
   RefreshCw,
   Send,
+  ShieldCheck,
   Sparkles,
+  Video,
+  X,
 } from 'lucide-react';
 import {
   AvailabilityResponse,
   Booking,
   GiftOption,
+  InstagramPost,
   MessageSource,
   OccasionType,
   PropertyType,
@@ -33,10 +38,14 @@ import { User } from 'firebase/auth';
 import {
   createBookingApi,
   fetchAvailability,
+  fetchInstagramPosts,
   generateAiMessageApi,
   subscribeAvailability,
 } from '../lib/api';
-import { signInWithGoogle, signOutUser } from '../lib/firebase';
+import { signOutUser } from '../lib/firebase';
+import { AuthPanel } from './AuthPanel';
+import { HumanVerification } from './HumanVerification';
+import { PrivacyModal } from './PrivacyModal';
 import HERO_IMAGE from '../assets/images/hero_tribute_car_1794681123231.jpg';
 import CHAMPAGNE_IMAGE from '../assets/images/addon_champagne_gift_1794681123622.jpg';
 import CHOCOLATE_IMAGE from '../assets/images/addon_chocolate_box_1794681123620.jpg';
@@ -56,16 +65,23 @@ function formatDatePtBr(dateStr: string): string {
   return `${d}/${m}/${y}`;
 }
 
+function toInstagramEmbedUrl(url: string): string | null {
+  const match = url.match(/instagram\.com\/(reel|p|tv)\/([a-zA-Z0-9_\-]+)/i);
+  if (!match) return null;
+  return `https://www.instagram.com/${match[1].toLowerCase()}/${match[2]}/embed/captioned/`;
+}
+
 interface BookingSiteProps {
   user: User | null;
+  refreshSignal?: number;
   onBookingCreated: (booking: Booking) => void;
-  onOpenAttendance: () => void;
+  onOpenAccount: () => void;
 }
 
 export const BookingSite: React.FC<BookingSiteProps> = ({
   user,
+  refreshSignal = 0,
   onBookingCreated,
-  onOpenAttendance,
 }) => {
   const [heroImgFailed, setHeroImgFailed] = useState(false);
   const [champagneImgFailed, setChampagneImgFailed] = useState(false);
@@ -104,6 +120,12 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const [messageTone, setMessageTone] = useState('Emocionante e caloroso');
   const [generatingAi, setGeneratingAi] = useState(false);
   const [aiError, setAiError] = useState('');
+
+  const [humanVerified, setHumanVerified] = useState(false);
+  const [lgpdAccepted, setLgpdAccepted] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [instagramPosts, setInstagramPosts] = useState<InstagramPost[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -165,6 +187,14 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     return () => unsub();
   }, [selectedDate]);
 
+  useEffect(() => {
+    fetchInstagramPosts()
+      .then(setInstagramPosts)
+      .catch(() => {
+        // Public fallback showcase remains visible if unavailable
+      });
+  }, [refreshSignal]);
+
   const pricing = useMemo(
     () => calculatePrices(neighborhood, giftOption, includeFireworks),
     [neighborhood, giftOption, includeFireworks]
@@ -222,12 +252,24 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       );
       return;
     }
+    if (!lgpdAccepted) {
+      setSubmitError(
+        'Aceite a Política de Privacidade e Proteção de Dados (LGPD) para proteger seus dados.'
+      );
+      return;
+    }
+    if (!humanVerified) {
+      setSubmitError('Confirme a verificação "Sou humano" antes de concluir.');
+      return;
+    }
+
+    if (!user || !user.emailVerified) {
+      setAuthModalOpen(true);
+      return;
+    }
 
     setSubmitting(true);
     try {
-      if (!user) {
-        await signInWithGoogle();
-      }
       const booking = await createBookingApi({
         date: selectedDate,
         time: selectedTime,
@@ -247,8 +289,10 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         customMessage: customMessage.trim(),
         generatedScript: generatedScript.trim(),
         notes: `Participação escolhida: ${participationMode}`,
+        lgpdConsent: true,
       });
       setConfirmedBooking(booking);
+      setHumanVerified(false);
       onBookingCreated(booking);
       await loadSlots(selectedDate);
     } catch (err) {
@@ -330,13 +374,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               >
                 Escolher Data e Horário
               </a>
-              <button
-                type="button"
-                onClick={onOpenAttendance}
-                className="px-5 py-3 text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-lg transition-colors whitespace-nowrap shrink-0"
+              <a
+                href="#instagram"
+                className="inline-flex items-center gap-2 px-5 py-3 text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
-                Área da Empresa / Mensagens Prontas
-              </button>
+                <Video className="w-4 h-4 text-[#991B1B]" />
+                Vídeos no @despertecoracoes
+              </a>
             </div>
           </div>
 
@@ -1312,6 +1356,34 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 </div>
               </div>
 
+              <div className="mt-4 space-y-3">
+                <HumanVerification
+                  verified={humanVerified}
+                  onVerifiedChange={setHumanVerified}
+                  compact
+                />
+
+                <label className="flex items-start gap-2 text-xs text-[#575049] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={lgpdAccepted}
+                    onChange={(e) => setLgpdAccepted(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-[#991B1B] shrink-0"
+                  />
+                  <span>
+                    Concordo com a{' '}
+                    <button
+                      type="button"
+                      onClick={() => setPrivacyOpen(true)}
+                      className="text-[#991B1B] underline hover:text-[#7F1D1D]"
+                    >
+                      Política de Privacidade (LGPD)
+                    </button>{' '}
+                    para proteção dos meus dados.
+                  </span>
+                </label>
+              </div>
+
               {submitError && (
                 <p className="mt-4 text-sm text-[#DC2626] bg-[#DC2626]/5 border border-[#DC2626]/20 rounded-lg p-3">
                   {submitError}
@@ -1325,15 +1397,16 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               >
                 {submitting
                   ? 'Confirmando Reserva...'
-                  : user
+                  : user && user.emailVerified
                     ? 'Confirmar Agendamento Automático'
-                    : 'Entrar com Google e Confirmar'}
+                    : 'Entrar / Registrar e Confirmar'}
               </button>
 
-              {user ? (
+              {user && user.emailVerified ? (
                 <div className="mt-3 flex items-center justify-between text-xs text-[#575049]">
-                  <span className="truncate max-w-[200px]">
-                    Conta: {user.email}
+                  <span className="truncate max-w-[200px] flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+                    {user.email}
                   </span>
                   <button
                     type="button"
@@ -1343,13 +1416,134 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                     Sair
                   </button>
                 </div>
+              ) : user && !user.emailVerified ? (
+                <div className="mt-3 text-xs text-[#D97706] flex items-center justify-between gap-2">
+                  <span>Verifique seu e-mail para confirmar.</span>
+                  <button
+                    type="button"
+                    onClick={() => setAuthModalOpen(true)}
+                    className="underline font-semibold whitespace-nowrap"
+                  >
+                    Validar Agora
+                  </button>
+                </div>
               ) : (
                 <p className="mt-3 text-xs text-[#575049] text-center">
-                  Ao confirmar, você entra com Google em 1 clique para reservar o horário com segurança.
+                  Ao confirmar, você entra com Google ou cria sua conta com verificação por e-mail para proteger seus dados.
                 </p>
               )}
             </aside>
           </form>
+        )}
+      </section>
+
+      {/* Instagram @despertecoracoes Showcase */}
+      <section
+        id="instagram"
+        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-12 border-t border-[#E6E2DC]"
+      >
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <p className="text-xs font-medium text-[#991B1B] mb-1.5">
+              Instagram Oficial · @despertecoracoes
+            </p>
+            <h2 className="font-display text-2xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
+              Emoções Reais em Vídeo (@despertecoracoes)
+            </h2>
+            <p className="text-sm sm:text-base text-[#575049] mt-1">
+              Confira nossas homenagens ao vivo, entregas de champanhe e queimas de fogos em Recife e Região Metropolitana.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <a
+              href="https://www.instagram.com/despertecoracoes/reels/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap"
+            >
+              <Video className="w-4 h-4" />
+              Ver Reels Mais Vistos
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+            <a
+              href="https://www.instagram.com/despertecoracoes/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-lg transition-colors whitespace-nowrap"
+            >
+              Seguir @despertecoracoes
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+
+        {instagramPosts.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {instagramPosts.map((post) => {
+              const embedUrl = toInstagramEmbedUrl(post.instagramUrl);
+              return (
+                <div
+                  key={post.id}
+                  className="bg-white border border-[#E6E2DC] rounded-xl overflow-hidden flex flex-col"
+                >
+                  <div className="p-4 border-b border-[#E6E2DC]">
+                    <p className="text-xs text-[#575049]">
+                      {post.occasion || 'Homenagem ao Vivo'}
+                      {post.viewsLabel ? ` · ${post.viewsLabel}` : ''}
+                    </p>
+                    <h3 className="text-sm font-semibold text-[#171412] mt-0.5 truncate">
+                      {post.title}
+                    </h3>
+                  </div>
+
+                  {embedUrl ? (
+                    <div className="w-full aspect-[3/4] bg-[#FAF9F7]">
+                      <iframe
+                        src={embedUrl}
+                        title={post.title}
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        className="w-full h-full border-0"
+                        allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="p-3.5 bg-[#FAF9F7] border-t border-[#E6E2DC] mt-auto">
+                    <a
+                      href={post.instagramUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#991B1B] hover:underline"
+                    >
+                      Assistir no Instagram @despertecoracoes
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-white border border-[#E6E2DC] rounded-xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <p className="text-base font-semibold text-[#171412]">
+                Acompanhe nossas homenagens diárias no perfil oficial @despertecoracoes
+              </p>
+              <p className="text-sm text-[#575049] leading-relaxed">
+                Veja surpresas reais de aniversário, reconciliação, queimas de fogos (12x1, chuva de prata e vulcão) e momentos emocionantes de famílias usando nosso microfone ao vivo em Recife.
+              </p>
+            </div>
+            <a
+              href="https://www.instagram.com/despertecoracoes/reels/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-[#171412] hover:bg-[#2F2A26] rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              Abrir @despertecoracoes no Instagram
+              <ExternalLink className="w-4 h-4" />
+            </a>
+          </div>
         )}
       </section>
 
@@ -1394,14 +1588,52 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
 
       <footer className="max-w-[1280px] mx-auto px-4 sm:px-8 pt-8 border-t border-[#E6E2DC] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#575049]">
         <p>Desperte Corações · Carro de Mensagem ao Vivo em Recife e RMR</p>
-        <button
-          type="button"
-          onClick={onOpenAttendance}
-          className="hover:text-[#171412] underline underline-offset-4"
-        >
-          Acesso ao Centro de Atendimento e Agenda
-        </button>
+        <div className="flex items-center gap-5">
+          <a
+            href="https://www.instagram.com/despertecoracoes/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-[#171412] underline underline-offset-4"
+          >
+            Instagram @despertecoracoes
+          </a>
+          <button
+            type="button"
+            onClick={() => setPrivacyOpen(true)}
+            className="hover:text-[#171412] underline underline-offset-4"
+          >
+            Privacidade e Segurança (LGPD)
+          </button>
+        </div>
       </footer>
+
+      {/* Modal: Entrar / Registrar para concluir reserva sem perder dados */}
+      {authModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-lg my-8">
+            <button
+              type="button"
+              onClick={() => setAuthModalOpen(false)}
+              aria-label="Fechar janela de login"
+              className="absolute right-4 top-4 z-10 p-1.5 text-[#575049] hover:text-[#171412] bg-[#FAF9F7] rounded-lg border border-[#E6E2DC]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <AuthPanel
+              user={user}
+              title="Finalize seu Agendamento com Segurança"
+              subtitle="Entre com Google ou crie sua conta com e-mail verificado para proteger seus dados e concluir a reserva."
+              onAuthComplete={() => setAuthModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      <PrivacyModal open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </main>
   );
 };

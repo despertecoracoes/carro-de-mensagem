@@ -54,7 +54,7 @@ service cloud.firestore {
           'neighborhood', 'streetAddress', 'propertyType', 'referencePoint',
           'giftOption', 'includeFireworks', 'songs', 'messageSource',
           'customMessage', 'generatedScript', 'basePrice', 'extrasPrice',
-          'totalPrice', 'status', 'notes', 'createdAt', 'updatedAt'
+          'totalPrice', 'status', 'notes', 'lgpdConsent', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
           'ownerUid', 'slotId', 'protocol', 'date', 'time', 'occasion',
@@ -62,7 +62,7 @@ service cloud.firestore {
           'neighborhood', 'streetAddress', 'propertyType', 'referencePoint',
           'giftOption', 'includeFireworks', 'songs', 'messageSource',
           'customMessage', 'generatedScript', 'basePrice', 'extrasPrice',
-          'totalPrice', 'status', 'notes', 'createdAt', 'updatedAt'
+          'totalPrice', 'status', 'notes', 'lgpdConsent', 'createdAt', 'updatedAt'
         ])
         && data.ownerUid is string && data.ownerUid.size() > 0 && data.ownerUid.size() <= 128
         && data.slotId is string && isValidId(data.slotId) && data.slotId.matches('^\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}$')
@@ -92,7 +92,31 @@ service cloud.firestore {
         && data.totalPrice is number && data.totalPrice >= 0 && data.totalPrice <= 20000
         && data.status is string && data.status.size() <= 20 && data.status in ['Pendente', 'Confirmado', 'Em Rota', 'Concluído', 'Cancelado']
         && data.notes is string && data.notes.size() <= 1000
+        && data.lgpdConsent is bool && data.lgpdConsent == true
         && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['displayName', 'email', 'phone', 'lgpdConsent', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['displayName', 'email', 'phone', 'lgpdConsent', 'createdAt', 'updatedAt'])
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.phone is string && data.phone.size() <= 30
+        && data.lgpdConsent is bool && data.lgpdConsent == true
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInstagramPost(data) {
+      return data.keys().hasAll(['title', 'instagramUrl', 'viewsLabel', 'occasion', 'order', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'instagramUrl', 'viewsLabel', 'occasion', 'order', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.instagramUrl is string && data.instagramUrl.size() >= 15 && data.instagramUrl.size() <= 300
+        && data.instagramUrl.matches('^https://(www\\.)?instagram\\.com/(reel|p|tv)/[a-zA-Z0-9_\\-]+/?.*$')
+        && data.viewsLabel is string && data.viewsLabel.size() <= 60
+        && data.occasion is string && data.occasion.size() <= 60
+        && data.order is number && data.order >= 0 && data.order <= 1000
         && data.updatedAt is timestamp;
     }
 
@@ -170,6 +194,7 @@ service cloud.firestore {
         && incoming().ownerUid == existing().ownerUid
         && incoming().createdAt == existing().createdAt
         && incoming().slotId == existing().slotId
+        && incoming().lgpdConsent == existing().lgpdConsent
         && incoming().updatedAt == request.time
         && ((existing().status != 'Cancelado' && existing().status != 'Concluído') || isAdmin())
         && (
@@ -180,7 +205,52 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(bookingId);
     }
 
-    // 3. Quick-reply templates (Admin only)
+    // 3. Verified customer profiles (Strictly owner-isolated PII)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && request.auth.uid == userId));
+      allow list: if isAdminEmail();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().email == request.auth.token.email
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().email == existing().email
+        && incoming().lgpdConsent == existing().lgpdConsent
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'updatedAt']);
+
+      allow delete: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && request.auth.uid == userId));
+    }
+
+    // 4. Public Instagram @despertecoracoes highlights (Zero PII, Admin write)
+    match /instagram_posts/{postId} {
+      allow get: if isValidId(postId);
+      allow list: if true;
+
+      allow create: if isAdmin()
+        && isValidId(postId)
+        && isValidInstagramPost(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(postId)
+        && isValidInstagramPost(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'instagramUrl', 'viewsLabel', 'occasion', 'order', 'updatedAt']);
+
+      allow delete: if isAdmin() && isValidId(postId);
+    }
+
+    // 5. Quick-reply templates (Admin only)
     match /templates/{templateId} {
       allow get: if isValidId(templateId) && isAdmin();
       allow list: if isAdminEmail();
@@ -199,7 +269,7 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(templateId);
     }
 
-    // 4. Admins lookup
+    // 6. Admins lookup
     match /admins/{adminUid} {
       allow get: if isValidId(adminUid) && isAdmin();
       allow list: if isAdminEmail();

@@ -1,15 +1,19 @@
 import React from 'react';
+import { User } from 'firebase/auth';
+import { isAdminUser } from '../lib/firebase';
 
-export type AppMode = 'booking' | 'attendance';
+export type AppMode = 'booking' | 'account';
 
 interface TopNavProps {
   mode: AppMode;
+  user: User | null;
   onModeChange: (mode: AppMode) => void;
   onScrollToSection: (sectionId: string) => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
   mode,
+  user,
   onModeChange,
   onScrollToSection,
 }) => {
@@ -21,6 +25,12 @@ export const TopNav: React.FC<TopNavProps> = ({
       onScrollToSection(sectionId);
     }
   };
+
+  const accountLabel = isAdminUser(user)
+    ? 'Painel Admin'
+    : user && user.emailVerified
+      ? 'Minha Conta'
+      : 'Entrar / Registrar';
 
   return (
     <header className="sticky top-0 z-30 bg-[#FAF9F7]/95 backdrop-blur-sm border-b border-[#E6E2DC]">
@@ -56,6 +66,13 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => handleNavClick('instagram')}
+            className="hover:text-[#171412] hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0 py-2"
+          >
+            @despertecoracoes
+          </button>
+          <button
+            type="button"
             onClick={() => handleNavClick('como-funciona')}
             className="hover:text-[#171412] hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0 py-2"
           >
@@ -63,14 +80,14 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => onModeChange('attendance')}
+            onClick={() => onModeChange('account')}
             className={`transition-colors whitespace-nowrap shrink-0 py-2 ${
-              mode === 'attendance'
+              mode === 'account'
                 ? 'text-[#991B1B] underline underline-offset-4 font-semibold'
                 : 'hover:text-[#171412] hover:underline underline-offset-4'
             }`}
           >
-            Atendimento
+            {accountLabel}
           </button>
         </nav>
 
@@ -78,7 +95,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (mode === 'attendance') {
+              if (mode === 'account') {
                 onModeChange('booking');
               } else {
                 handleNavClick('agendar');
@@ -86,7 +103,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             }}
             className="px-4 py-2.5 text-sm font-medium text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#991B1B]"
           >
-            {mode === 'attendance' ? 'Ver Site Público' : 'Reservar Horário'}
+            {mode === 'account' ? 'Voltar ao Site' : 'Reservar Horário'}
           </button>
         </div>
       </div>
@@ -108,6 +125,13 @@ export const TopNav: React.FC<TopNavProps> = ({
         </button>
         <button
           type="button"
+          onClick={() => handleNavClick('instagram')}
+          className="whitespace-nowrap shrink-0 py-1.5"
+        >
+          Instagram
+        </button>
+        <button
+          type="button"
           onClick={() => handleNavClick('como-funciona')}
           className="whitespace-nowrap shrink-0 py-1.5"
         >
@@ -115,12 +139,12 @@ export const TopNav: React.FC<TopNavProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => onModeChange('attendance')}
+          onClick={() => onModeChange('account')}
           className={`whitespace-nowrap shrink-0 py-1.5 ${
-            mode === 'attendance' ? 'text-[#991B1B] font-semibold' : ''
+            mode === 'account' ? 'text-[#991B1B] font-semibold' : ''
           }`}
         >
-          Centro de Atendimento
+          {accountLabel}
         </button>
       </div>
     </header>

@@ -47,7 +47,7 @@
     },
     "Booking": {
       "title": "Booking",
-      "description": "Live tribute car reservation containing customer contact, address, songs, gifts, and script.",
+      "description": "Live tribute car reservation containing customer contact, address, songs, gifts, LGPD consent, and script.",
       "type": "object",
       "properties": {
         "ownerUid": {
@@ -184,6 +184,10 @@
           "maxLength": 1000,
           "description": "Operational notes and participation mode."
         },
+        "lgpdConsent": {
+          "type": "boolean",
+          "description": "Explicit LGPD privacy policy consent accepted at reservation time."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -221,9 +225,89 @@
         "totalPrice",
         "status",
         "notes",
+        "lgpdConsent",
         "createdAt",
         "updatedAt"
       ]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Verified customer account profile strictly isolated by owner UID.",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer full name."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "description": "Verified email address."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Optional WhatsApp contact number."
+        },
+        "lgpdConsent": {
+          "type": "boolean",
+          "description": "Explicit LGPD privacy consent accepted on registration."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["displayName", "email", "phone", "lgpdConsent", "createdAt", "updatedAt"]
+    },
+    "InstagramPost": {
+      "title": "InstagramPost",
+      "description": "Public Instagram Reel showcase entry for @despertecoracoes managed by admin.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Video or tribute highlight title."
+        },
+        "instagramUrl": {
+          "type": "string",
+          "pattern": "^https://(www\\.)?instagram\\.com/(reel|p|tv)/[a-zA-Z0-9_\\-]+/?.*$",
+          "minLength": 15,
+          "maxLength": 300,
+          "description": "Direct URL to the Instagram Reel or post."
+        },
+        "viewsLabel": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Optional view count label (e.g., 145 mil visualizações)."
+        },
+        "occasion": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Tribute occasion label."
+        },
+        "order": {
+          "type": "number",
+          "description": "Display sort order."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["title", "instagramUrl", "viewsLabel", "occasion", "order", "updatedAt"]
     },
     "QuickTemplate": {
       "title": "QuickTemplate",
@@ -290,6 +374,14 @@
     "/bookings/{bookingId}": {
       "schema": { "$ref": "#/entities/Booking" },
       "description": "Customer tribute reservations with strict owner and admin PII isolation."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Verified customer profiles strictly isolated by owner UID."
+    },
+    "/instagram_posts/{postId}": {
+      "schema": { "$ref": "#/entities/InstagramPost" },
+      "description": "Public @despertecoracoes Instagram video highlights."
     },
     "/templates/{templateId}": {
       "schema": { "$ref": "#/entities/QuickTemplate" },

@@ -17,9 +17,11 @@ import {
   AvailabilityResponse,
   Booking,
   BookingStatus,
+  InstagramPost,
   QuickTemplate,
   TemplateCategory,
   TimeSlotAvailability,
+  UserProfile,
 } from '../types/booking';
 import {
   calculatePrices,
@@ -82,6 +84,7 @@ function mapDocToBooking(id: string, data: Record<string, unknown>): Booking {
     totalPrice: Number(data.totalPrice ?? 250),
     status: (data.status as BookingStatus) ?? 'Pendente',
     notes: String(data.notes ?? ''),
+    lgpdConsent: Boolean(data.lgpdConsent ?? true),
     createdAt: formatTimestamp(data.createdAt),
   };
 }
@@ -157,7 +160,7 @@ export async function toggleSlotBlock(
 ): Promise<AvailabilityResponse> {
   const user = auth.currentUser;
   if (!user || !isAdminUser(user)) {
-    throw new Error('Faça login como administrador para bloquear ou liberar horários.');
+    throw new Error('Acesso restrito.');
   }
 
   const slotId = makeSlotId(date, time);
@@ -195,7 +198,7 @@ export async function toggleSlotBlock(
 
 export async function fetchBookings(): Promise<Booking[]> {
   const user = auth.currentUser;
-  if (!user) {
+  if (!user || !user.emailVerified) {
     return [];
   }
 
@@ -237,10 +240,14 @@ export async function createBookingApi(payload: {
   generatedScript?: string;
   status?: BookingStatus;
   notes?: string;
+  lgpdConsent?: boolean;
 }): Promise<Booking> {
   const user = auth.currentUser;
   if (!user) {
-    throw new Error('Entre com sua conta Google para confirmar o agendamento.');
+    throw new Error('Entre ou crie sua conta para confirmar o agendamento.');
+  }
+  if (!user.emailVerified) {
+    throw new Error('Confirme seu e-mail pelo link enviado antes de concluir a reserva.');
   }
 
   const slotId = makeSlotId(payload.date, payload.time);
@@ -297,6 +304,7 @@ export async function createBookingApi(payload: {
       totalPrice: prices.totalPrice,
       status,
       notes: (payload.notes ?? '').trim().slice(0, 1000),
+      lgpdConsent: true,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -340,6 +348,7 @@ export async function createBookingApi(payload: {
       totalPrice: bookingDoc.totalPrice,
       status: bookingDoc.status,
       notes: bookingDoc.notes,
+      lgpdConsent: true,
       createdAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -410,6 +419,140 @@ export async function deleteBookingApi(id: string): Promise<void> {
       batch.delete(doc(db, 'slots', slotId));
     }
     await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function fetchUserProfile(uid: string): Promise<UserProfile | null> {
+  const path = `users/${uid}`;
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (!snap.exists()) return null;
+    const d = snap.data();
+    return {
+      uid,
+      displayName: String(d.displayName ?? ''),
+      email: String(d.email ?? ''),
+      phone: String(d.phone ?? ''),
+      lgpdConsent: Boolean(d.lgpdConsent ?? true),
+      createdAt: formatTimestamp(d.createdAt),
+      updatedAt: formatTimestamp(d.updatedAt),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export async function upsertUserProfile(payload: {
+  displayName: string;
+  phone: string;
+}): Promise<UserProfile> {
+  const user = auth.currentUser;
+  if (!user || !user.emailVerified || !user.email) {
+    throw new Error('Conta verificada necessária para salvar o perfil.');
+  }
+  const path = `users/${user.uid}`;
+  const ref = doc(db, 'users', user.uid);
+  try {
+    const existing = await getDoc(ref);
+    const displayName = payload.displayName.trim().slice(0, 120) || 'Cliente';
+    const phone = payload.phone.trim().slice(0, 30);
+
+    if (existing.exists()) {
+      await setDoc(
+        ref,
+        {
+          displayName,
+          phone,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } else {
+      await setDoc(ref, {
+        displayName,
+        email: user.email.slice(0, 160),
+        phone,
+        lgpdConsent: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    return {
+      uid: user.uid,
+      displayName,
+      email: user.email,
+      phone,
+      lgpdConsent: true,
+      createdAt: existing.exists()
+        ? formatTimestamp(existing.data().createdAt)
+        : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function fetchInstagramPosts(): Promise<InstagramPost[]> {
+  const path = 'instagram_posts';
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs
+      .map((d) => ({
+        id: d.id,
+        title: String(d.data().title ?? ''),
+        instagramUrl: String(d.data().instagramUrl ?? ''),
+        viewsLabel: String(d.data().viewsLabel ?? ''),
+        occasion: String(d.data().occasion ?? ''),
+        order: Number(d.data().order ?? 0),
+        updatedAt: formatTimestamp(d.data().updatedAt),
+      }))
+      .sort((a, b) => a.order - b.order);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}
+
+export async function createInstagramPostApi(payload: {
+  title: string;
+  instagramUrl: string;
+  viewsLabel: string;
+  occasion: string;
+  order: number;
+}): Promise<InstagramPost> {
+  const id = `ig-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const path = `instagram_posts/${id}`;
+  try {
+    const data = {
+      title: payload.title.trim().slice(0, 140),
+      instagramUrl: payload.instagramUrl.trim().slice(0, 300),
+      viewsLabel: payload.viewsLabel.trim().slice(0, 60),
+      occasion: payload.occasion.trim().slice(0, 60),
+      order: Math.max(0, Math.min(1000, Number(payload.order) || 0)),
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, 'instagram_posts', id), data);
+    return {
+      id,
+      title: data.title,
+      instagramUrl: data.instagramUrl,
+      viewsLabel: data.viewsLabel,
+      occasion: data.occasion,
+      order: data.order,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function deleteInstagramPostApi(id: string): Promise<void> {
+  const path = `instagram_posts/${id}`;
+  try {
+    await deleteDoc(doc(db, 'instagram_posts', id));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

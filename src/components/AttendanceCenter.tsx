@@ -14,6 +14,7 @@ import {
   Sparkles,
   Trash2,
   Unlock,
+  Video,
   X,
 } from 'lucide-react';
 import {
@@ -21,6 +22,7 @@ import {
   Booking,
   BookingStatus,
   GiftOption,
+  InstagramPost,
   MessageSource,
   OccasionType,
   PropertyType,
@@ -37,25 +39,23 @@ import {
 import { User } from 'firebase/auth';
 import {
   createBookingApi,
+  createInstagramPostApi,
   createTemplateApi,
   deleteBookingApi,
+  deleteInstagramPostApi,
   deleteTemplateApi,
   fetchAvailability,
   fetchBookings,
+  fetchInstagramPosts,
   fetchTemplates,
   generateAiMessageApi,
   toggleSlotBlock,
   updateBookingApi,
   updateTemplateApi,
 } from '../lib/api';
-import {
-  ADMIN_EMAIL,
-  isAdminUser,
-  signInWithGoogle,
-  signOutUser,
-} from '../lib/firebase';
+import { isAdminUser, signOutUser } from '../lib/firebase';
 
-type WorkspaceTab = 'templates' | 'bookings' | 'schedule';
+type WorkspaceTab = 'templates' | 'bookings' | 'schedule' | 'instagram';
 
 function getTodayStr(): string {
   const d = new Date();
@@ -103,12 +103,11 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
   onPublicScheduleChanged,
 }) => {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('templates');
-  const [authError, setAuthError] = useState('');
-  const [signingIn, setSigningIn] = useState(false);
 
   // Shared Data
   const [templates, setTemplates] = useState<QuickTemplate[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [instagramPosts, setInstagramPosts] = useState<InstagramPost[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState('');
 
@@ -173,13 +172,26 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
   const [loadingSchedule, setLoadingSchedule] = useState(false);
   const [togglingSlot, setTogglingSlot] = useState<string | null>(null);
 
+  // Instagram @despertecoracoes Showcase State
+  const [igTitle, setIgTitle] = useState('');
+  const [igUrl, setIgUrl] = useState('');
+  const [igViews, setIgViews] = useState('');
+  const [igOccasion, setIgOccasion] = useState('Aniversário');
+  const [igError, setIgError] = useState('');
+  const [savingIg, setSavingIg] = useState(false);
+
   const loadWorkspaceData = useCallback(async () => {
     setLoadingData(true);
     setDataError('');
     try {
-      const [tpls, bkgs] = await Promise.all([fetchTemplates(), fetchBookings()]);
+      const [tpls, bkgs, igs] = await Promise.all([
+        fetchTemplates(),
+        fetchBookings(),
+        fetchInstagramPosts(),
+      ]);
       setTemplates(tpls);
       setBookings(bkgs);
+      setInstagramPosts(igs);
       setSelectedBookingId((prev) => {
         if (prev && bkgs.some((b) => b.id === prev)) return prev;
         return bkgs[0]?.id ?? null;
@@ -464,72 +476,51 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
     }
   };
 
-  const handleAdminSignIn = async () => {
-    setAuthError('');
-    setSigningIn(true);
+  const handleAddInstagramPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIgError('');
+    const trimmedUrl = igUrl.trim();
+    if (!/^https:\/\/(www\.)?instagram\.com\/(reel|p|tv)\/[a-zA-Z0-9_\-]+/.test(trimmedUrl)) {
+      setIgError(
+        'Cole um link válido de vídeo/Reel do Instagram (ex.: https://www.instagram.com/reel/...).'
+      );
+      return;
+    }
+    if (!igTitle.trim()) {
+      setIgError('Informe um título curto para o vídeo.');
+      return;
+    }
+    setSavingIg(true);
     try {
-      await signInWithGoogle();
+      const created = await createInstagramPostApi({
+        title: igTitle.trim(),
+        instagramUrl: trimmedUrl,
+        viewsLabel: igViews.trim(),
+        occasion: igOccasion.trim(),
+        order: instagramPosts.length,
+      });
+      setInstagramPosts((prev) => [...prev, created]);
+      setIgTitle('');
+      setIgUrl('');
+      setIgViews('');
+      onPublicScheduleChanged();
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Não foi possível concluir o login.'
+      setIgError(
+        err instanceof Error ? err.message : 'Erro ao adicionar vídeo.'
       );
     } finally {
-      setSigningIn(false);
+      setSavingIg(false);
     }
   };
 
-  if (!authReady) {
-    return (
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-8 py-16 text-center text-sm text-[#575049]">
-        Conectando ao banco de dados Firebase...
-      </div>
-    );
-  }
+  const handleDeleteInstagramPost = async (id: string) => {
+    await deleteInstagramPostApi(id);
+    setInstagramPosts((prev) => prev.filter((p) => p.id !== id));
+    onPublicScheduleChanged();
+  };
 
-  if (!isAdminUser(user)) {
-    return (
-      <div className="max-w-lg mx-auto px-4 py-16">
-        <div className="bg-white border border-[#E6E2DC] rounded-xl p-8 text-center">
-          <Lock className="w-8 h-8 text-[#991B1B] mx-auto mb-3" />
-          <h1 className="font-display text-2xl font-semibold text-[#171412] mb-2">
-            Acesso ao Centro de Atendimento
-          </h1>
-          <p className="text-sm text-[#575049] leading-relaxed mb-6">
-            Para gerenciar mensagens prontas, ver agendamentos completos e bloquear horários no Firebase gratuito, entre com a conta Google administradora ({ADMIN_EMAIL}).
-          </p>
-
-          {user && !isAdminUser(user) && (
-            <p className="text-xs text-[#DC2626] bg-[#DC2626]/5 border border-[#DC2626]/20 rounded-lg p-3 mb-4">
-              Você está conectado como {user.email}, que não possui permissão administrativa.
-            </p>
-          )}
-
-          {authError && (
-            <p className="text-xs text-[#DC2626] mb-4">{authError}</p>
-          )}
-
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              disabled={signingIn}
-              onClick={handleAdminSignIn}
-              className="w-full py-3 px-5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
-            >
-              {signingIn ? 'Abrindo Google...' : 'Entrar com Google (Admin)'}
-            </button>
-            {user && (
-              <button
-                type="button"
-                onClick={() => signOutUser()}
-                className="w-full py-2.5 px-4 text-xs font-medium text-[#575049] hover:text-[#171412]"
-              >
-                Sair da conta atual
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+  if (!authReady || !isAdminUser(user)) {
+    return null;
   }
 
   return (
@@ -595,6 +586,24 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
               <span className="flex items-center gap-2">
                 <Clock className="w-4 h-4" />
                 Horários Disponíveis
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('instagram')}
+              className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'instagram'
+                  ? 'bg-[#991B1B] text-white'
+                  : 'text-[#575049] hover:text-[#171412] hover:bg-[#FAF9F7]'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Video className="w-4 h-4" />
+                Vídeos @despertecoracoes
+              </span>
+              <span className="font-mono text-xs opacity-80 tabular-nums">
+                {instagramPosts.length}
               </span>
             </button>
           </nav>
@@ -1359,6 +1368,143 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* TAB 4: VÍDEOS DO INSTAGRAM @despertecoracoes */}
+          {activeTab === 'instagram' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="font-display text-2xl font-semibold text-[#171412]">
+                  Vídeos em Destaque (@despertecoracoes)
+                </h2>
+                <p className="text-sm text-[#575049] mt-0.5">
+                  Cole aqui os links dos Reels mais visualizados do seu Instagram{' '}
+                  <a
+                    href="https://www.instagram.com/despertecoracoes/reels/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#991B1B] underline"
+                  >
+                    @despertecoracoes
+                  </a>{' '}
+                  para que apareçam reproduzidos direto no site público.
+                </p>
+              </div>
+
+              <form
+                onSubmit={handleAddInstagramPost}
+                className="bg-white border border-[#E6E2DC] rounded-xl p-5 space-y-4"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Título da Homenagem *
+                    </label>
+                    <input
+                      type="text"
+                      value={igTitle}
+                      onChange={(e) => setIgTitle(e.target.value)}
+                      placeholder="Ex: Surpresa de Aniversário no Ipsep"
+                      className="w-full px-3 py-2 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Link do Reel ou Post no Instagram *
+                    </label>
+                    <input
+                      type="url"
+                      value={igUrl}
+                      onChange={(e) => setIgUrl(e.target.value)}
+                      placeholder="https://www.instagram.com/reel/..."
+                      className="w-full px-3 py-2 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Visualizações (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={igViews}
+                      onChange={(e) => setIgViews(e.target.value)}
+                      placeholder="Ex: 145 mil visualizações"
+                      className="w-full px-3 py-2 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Ocasião
+                    </label>
+                    <input
+                      type="text"
+                      value={igOccasion}
+                      onChange={(e) => setIgOccasion(e.target.value)}
+                      placeholder="Aniversário / Reconciliação"
+                      className="w-full px-3 py-2 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                {igError && (
+                  <p className="text-xs text-[#DC2626]">{igError}</p>
+                )}
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingIg}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
+                  >
+                    <Plus className="w-4 h-4" />
+                    {savingIg ? 'Publicando...' : 'Adicionar Vídeo no Site'}
+                  </button>
+                </div>
+              </form>
+
+              {instagramPosts.length === 0 ? (
+                <div className="bg-white border border-[#E6E2DC] rounded-xl p-8 text-center text-sm text-[#575049]">
+                  Nenhum vídeo cadastrado ainda. Adicione o link de um Reel do @despertecoracoes acima para exibir na vitrine do site.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {instagramPosts.map((post) => (
+                    <div
+                      key={post.id}
+                      className="bg-white border border-[#E6E2DC] rounded-xl p-4 flex items-start justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs text-[#991B1B] font-medium">
+                          {post.occasion || 'Homenagem'}
+                          {post.viewsLabel ? ` · ${post.viewsLabel}` : ''}
+                        </p>
+                        <h3 className="text-sm font-semibold text-[#171412] mt-0.5">
+                          {post.title}
+                        </h3>
+                        <a
+                          href={post.instagramUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-[#575049] hover:text-[#171412] underline truncate block mt-1"
+                        >
+                          {post.instagramUrl}
+                        </a>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteInstagramPost(post.id)}
+                        aria-label="Remover vídeo"
+                        className="p-2 text-[#575049] hover:text-[#DC2626] rounded shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </section>

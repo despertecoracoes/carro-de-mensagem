@@ -5,23 +5,23 @@
 export const DIRTY_DOZEN_CASES = [
   {
     id: 'DD-01',
-    description: 'Unauthenticated user cannot read bookings PII',
+    description: 'Unauthenticated user cannot read bookings or users PII',
     collection: 'bookings',
     operation: 'get',
     expected: 'PERMISSION_DENIED',
   },
   {
     id: 'DD-02',
-    description: 'Authenticated non-owner cannot read another user booking',
-    collection: 'bookings',
+    description: 'Authenticated non-owner cannot read another user booking or profile',
+    collection: 'users',
     operation: 'get',
     expected: 'PERMISSION_DENIED',
   },
   {
     id: 'DD-03',
-    description: 'Unverified admin email spoof cannot read templates or bookings',
-    collection: 'templates',
-    operation: 'list',
+    description: 'Unverified email user (email_verified: false) cannot create booking',
+    collection: 'bookings',
+    operation: 'create',
     expected: 'PERMISSION_DENIED',
   },
   {
@@ -40,7 +40,7 @@ export const DIRTY_DOZEN_CASES = [
   },
   {
     id: 'DD-06',
-    description: 'Non-admin cannot self-confirm booking status on create',
+    description: 'Booking create with lgpdConsent: false or status: Confirmado rejected',
     collection: 'bookings',
     operation: 'create',
     expected: 'PERMISSION_DENIED',
@@ -68,8 +68,8 @@ export const DIRTY_DOZEN_CASES = [
   },
   {
     id: 'DD-10',
-    description: 'Oversized string or invalid ID rejected by size and regex guards',
-    collection: 'bookings',
+    description: 'Non-Instagram or javascript: URL rejected in instagram_posts',
+    collection: 'instagram_posts',
     operation: 'create',
     expected: 'PERMISSION_DENIED',
   },
@@ -82,7 +82,7 @@ export const DIRTY_DOZEN_CASES = [
   },
   {
     id: 'DD-12',
-    description: 'Non-admin cannot write to templates or admins collections',
+    description: 'Non-admin cannot write to templates, instagram_posts, or admins collections',
     collection: 'templates',
     operation: 'create',
     expected: 'PERMISSION_DENIED',

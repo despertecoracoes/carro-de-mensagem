@@ -44,7 +44,28 @@ export interface Booking {
   totalPrice: number;
   status: BookingStatus;
   notes: string;
+  lgpdConsent?: boolean;
   createdAt: string;
+}
+
+export interface UserProfile {
+  uid: string;
+  displayName: string;
+  email: string;
+  phone: string;
+  lgpdConsent: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InstagramPost {
+  id: string;
+  title: string;
+  instagramUrl: string;
+  viewsLabel: string;
+  occasion: string;
+  order: number;
+  updatedAt: string;
 }
 
 export type SlotState = 'available' | 'booked' | 'blocked';
