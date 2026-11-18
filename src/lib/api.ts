@@ -238,6 +238,7 @@ export async function createBookingApi(payload: {
   messageSource: Booking['messageSource'];
   customMessage: string;
   generatedScript?: string;
+  basePrice?: number;
   status?: BookingStatus;
   notes?: string;
   lgpdConsent?: boolean;
@@ -264,7 +265,7 @@ export async function createBookingApi(payload: {
     }
 
     const prices = calculatePrices(
-      payload.neighborhood,
+      payload.basePrice ?? payload.neighborhood,
       payload.giftOption,
       payload.includeFireworks
     );

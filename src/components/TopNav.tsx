@@ -34,14 +34,14 @@ export const TopNav: React.FC<TopNavProps> = ({
 
   return (
     <header className="sticky top-0 z-30 bg-[#FAF9F7]/95 backdrop-blur-sm border-b border-[#E6E2DC]">
-      <div className="max-w-[1280px] mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-8">
+      <div className="max-w-[1280px] mx-auto px-4 sm:px-8 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-8">
         <button
           type="button"
           onClick={() => {
             onModeChange('booking');
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
-          className="font-display text-xl font-semibold tracking-tight text-[#171412] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#991B1B]"
+          className="font-display text-lg sm:text-xl font-semibold tracking-tight text-[#171412] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#991B1B]"
         >
           Desperte Corações
         </button>
@@ -91,7 +91,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
         </nav>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -101,46 +101,39 @@ export const TopNav: React.FC<TopNavProps> = ({
                 handleNavClick('agendar');
               }
             }}
-            className="px-4 py-2.5 text-sm font-medium text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#991B1B]"
+            className="px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm font-medium text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#991B1B]"
           >
             {mode === 'account' ? 'Voltar ao Site' : 'Reservar Horário'}
           </button>
         </div>
       </div>
 
-      <div className="md:hidden border-t border-[#E6E2DC] px-4 py-2 flex items-center justify-between gap-4 text-xs font-medium text-[#575049] overflow-x-auto">
+      <div className="md:hidden border-t border-[#E6E2DC] px-4 py-1.5 flex items-center justify-between gap-2 text-xs font-medium text-[#575049]">
         <button
           type="button"
           onClick={() => handleNavClick('agendar')}
-          className="whitespace-nowrap shrink-0 py-1.5"
+          className="whitespace-nowrap shrink-0 py-1 text-[#171412]"
         >
           Agendar
         </button>
         <button
           type="button"
           onClick={() => handleNavClick('mimos')}
-          className="whitespace-nowrap shrink-0 py-1.5"
+          className="whitespace-nowrap shrink-0 py-1"
         >
-          Mimos
+          Brindes
         </button>
         <button
           type="button"
           onClick={() => handleNavClick('instagram')}
-          className="whitespace-nowrap shrink-0 py-1.5"
+          className="whitespace-nowrap shrink-0 py-1"
         >
-          Instagram
-        </button>
-        <button
-          type="button"
-          onClick={() => handleNavClick('como-funciona')}
-          className="whitespace-nowrap shrink-0 py-1.5"
-        >
-          Como Funciona
+          Vídeos
         </button>
         <button
           type="button"
           onClick={() => onModeChange('account')}
-          className={`whitespace-nowrap shrink-0 py-1.5 ${
+          className={`whitespace-nowrap shrink-0 py-1 ${
             mode === 'account' ? 'text-[#991B1B] font-semibold' : ''
           }`}
         >

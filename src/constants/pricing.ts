@@ -39,6 +39,18 @@ export const OCCASIONS: {
   },
 ];
 
+export const COMPANY_WHATSAPP_NUMBER = '5581999261694';
+export const COMPANY_WHATSAPP_DISPLAY = '(81) 99926-1694';
+export const COMPANY_ADDRESS =
+  'Rua Rio Amazonas, S/N, Bloco 86G, Quadra 2 — Ipsep, Recife - PE';
+
+export function buildCompanyWhatsappUrl(message?: string): string {
+  const text =
+    message ??
+    'Olá! Vim pelo site da Desperte Corações e gostaria de atendimento para agendar uma homenagem.';
+  return `https://wa.me/${COMPANY_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+}
+
 export interface NeighborhoodZone {
   id: string;
   label: string;
@@ -50,7 +62,7 @@ export const MINIMUM_BASE_PRICE = 250;
 export const NEIGHBORHOOD_ZONES: NeighborhoodZone[] = [
   {
     id: 'ipsep',
-    label: 'Ipsep (Ponto de saída — preço mínimo)',
+    label: 'Ipsep',
     basePrice: 250,
   },
   {
@@ -75,13 +87,13 @@ export const NEIGHBORHOOD_ZONES: NeighborhoodZone[] = [
   },
   {
     id: 'varzea-candeias-olinda',
-    label: 'Várzea / Caxangá / Candeias / Barra de Jangada / Olinda Sul',
+    label: 'Várzea / Caxangá / Candeias / Barra de Jangada',
     basePrice: 310,
   },
   {
-    id: 'rmr-distante',
-    label: 'Olinda Norte / Camaragibe / Paulista / Prazeres Distante',
-    basePrice: 330,
+    id: 'olinda-rmr',
+    label: 'Olinda / Camaragibe / Paulista / Região Metropolitana',
+    basePrice: 350,
   },
 ];
 
@@ -106,7 +118,7 @@ export const GIFT_OPTIONS: {
   {
     value: 'ambos',
     label: 'Levar os dois (Champanhe + Chocolate)',
-    price: 65,
+    price: 30,
     description: 'O primeiro mimo já é incluso; adicional referente apenas ao segundo item.',
   },
   {
@@ -142,14 +154,20 @@ export function formatBRL(value: number): string {
 }
 
 export function calculatePrices(
-  neighborhoodLabel: string,
+  basePriceOrNeighborhood: number | string,
   giftOption: GiftOption,
   includeFireworks: boolean
 ): { basePrice: number; extrasPrice: number; totalPrice: number } {
-  const matchedZone = NEIGHBORHOOD_ZONES.find(
-    (z) => z.label === neighborhoodLabel || z.id === neighborhoodLabel
-  );
-  const basePrice = matchedZone ? matchedZone.basePrice : MINIMUM_BASE_PRICE;
+  let basePrice = MINIMUM_BASE_PRICE;
+  if (typeof basePriceOrNeighborhood === 'number' && Number.isFinite(basePriceOrNeighborhood)) {
+    basePrice = Math.max(MINIMUM_BASE_PRICE, Math.round(basePriceOrNeighborhood));
+  } else if (typeof basePriceOrNeighborhood === 'string') {
+    const matchedZone = NEIGHBORHOOD_ZONES.find(
+      (z) => z.label === basePriceOrNeighborhood || z.id === basePriceOrNeighborhood
+    );
+    basePrice = matchedZone ? matchedZone.basePrice : MINIMUM_BASE_PRICE;
+  }
+
   const giftPrice = GIFT_OPTIONS.find((g) => g.value === giftOption)?.price ?? 0;
   const fireworksPrice = includeFireworks ? FIREWORKS_PRICE : 0;
   const extrasPrice = giftPrice + fireworksPrice;

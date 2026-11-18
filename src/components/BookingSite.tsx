@@ -1,19 +1,24 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
   Flame,
   Gift,
   Heart,
   MapPin,
+  MessageCircle,
   Music,
+  Phone,
   RefreshCw,
   Send,
   ShieldCheck,
   Sparkles,
   Video,
+  Wine,
   X,
 } from 'lucide-react';
 import {
@@ -26,14 +31,22 @@ import {
   PropertyType,
 } from '../types/booking';
 import {
+  buildCompanyWhatsappUrl,
   calculatePrices,
+  COMPANY_ADDRESS,
+  COMPANY_WHATSAPP_DISPLAY,
   FIREWORKS_PRICE,
   formatBRL,
   GIFT_OPTIONS,
-  MINIMUM_BASE_PRICE,
-  NEIGHBORHOOD_ZONES,
   OCCASIONS,
 } from '../constants/pricing';
+import {
+  AddressPriceResult,
+  calculateAddressPrice,
+  lookupCep,
+  SUGGESTED_CITIES,
+  SUGGESTED_NEIGHBORHOODS,
+} from '../lib/addressPricing';
 import { User } from 'firebase/auth';
 import {
   createBookingApi,
@@ -46,9 +59,95 @@ import { signOutUser } from '../lib/firebase';
 import { AuthPanel } from './AuthPanel';
 import { HumanVerification } from './HumanVerification';
 import { PrivacyModal } from './PrivacyModal';
-import HERO_IMAGE from '../assets/images/hero_tribute_car_1794681123231.jpg';
-import CHAMPAGNE_IMAGE from '../assets/images/addon_champagne_gift_1794681123622.jpg';
-import CHOCOLATE_IMAGE from '../assets/images/addon_chocolate_box_1794681123620.jpg';
+import HERO_IMAGE from '../assets/images/hero_carro_desperte.jpg';
+
+const HIGHLIGHT_VIDEO_CUTS = [
+  {
+    id: 'corte-1',
+    title: 'Bastidores do Carro de Mensagem',
+    occasion: 'Preparação & Som',
+    videoSrc: './assets/videos/corte_bastidores_carro.mp4',
+    posterSrc: './assets/videos/corte_bastidores_carro.jpg',
+  },
+  {
+    id: 'corte-2',
+    title: 'Declaração Emocionante para o Marido',
+    occasion: 'Declaração de Amor',
+    videoSrc: './assets/videos/corte_declaracao_marido.mp4',
+    posterSrc: './assets/videos/corte_declaracao_marido.jpg',
+  },
+  {
+    id: 'corte-3',
+    title: 'Surpresa de Aniversário com Bolo',
+    occasion: 'Aniversário',
+    videoSrc: './assets/videos/corte_aniversario_bolo.mp4',
+    posterSrc: './assets/videos/corte_aniversario_bolo.jpg',
+  },
+  {
+    id: 'corte-4',
+    title: 'Homenagem em Boa Viagem para Mãe',
+    occasion: 'Homenagem Especial',
+    videoSrc: './assets/videos/corte_boa_viagem_mae.mp4',
+    posterSrc: './assets/videos/corte_boa_viagem_mae.jpg',
+  },
+  {
+    id: 'corte-5',
+    title: 'Reconciliação com Microfone ao Vivo',
+    occasion: 'Reconciliação',
+    videoSrc: './assets/videos/corte_reconciliacao_surpresa.mp4',
+    posterSrc: './assets/videos/corte_reconciliacao_surpresa.jpg',
+  },
+];
+
+const DRAFT_STORAGE_KEY = 'desperte_booking_draft_v1';
+
+const BOOKING_SLIDES = [
+  { id: 0, code: '01', shortLabel: 'Data e Hora' },
+  { id: 1, code: '02', shortLabel: 'Tema e Dados' },
+  { id: 2, code: '03', shortLabel: 'Endereço' },
+  { id: 3, code: '04', shortLabel: 'Brinde e Músicas' },
+  { id: 4, code: '05', shortLabel: 'Mensagem' },
+] as const;
+
+interface BookingDraft {
+  currentStep?: number;
+  selectedDate?: string;
+  selectedTime?: string;
+  occasion?: OccasionType;
+  honoreeName?: string;
+  honoreeAge?: string;
+  clientName?: string;
+  clientWhatsapp?: string;
+  cep?: string;
+  city?: string;
+  neighborhood?: string;
+  streetAddress?: string;
+  propertyType?: PropertyType;
+  referencePoint?: string;
+  giftOption?: GiftOption;
+  includeFireworks?: boolean;
+  song1?: string;
+  song2?: string;
+  song3?: string;
+  messageSource?: MessageSource;
+  participationMode?:
+    | 'Microfone ao vivo (até 5 pessoas)'
+    | 'Envio de até 10 áudios (máx. 40s cada)'
+    | 'Apenas locução do carro';
+  customMessage?: string;
+  generatedScript?: string;
+  messageTone?: string;
+}
+
+function readSavedDraft(): BookingDraft {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as BookingDraft;
+  } catch {
+    return {};
+  }
+}
 
 function getDateString(offsetDays = 0): string {
   const base = new Date();
@@ -63,6 +162,12 @@ function formatDatePtBr(dateStr: string): string {
   const [y, m, d] = dateStr.split('-');
   if (!y || !m || !d) return dateStr;
   return `${d}/${m}/${y}`;
+}
+
+function formatCepInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 5) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 }
 
 function toInstagramEmbedUrl(url: string): string | null {
@@ -84,40 +189,90 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   onBookingCreated,
 }) => {
   const [heroImgFailed, setHeroImgFailed] = useState(false);
-  const [champagneImgFailed, setChampagneImgFailed] = useState(false);
-  const [chocolateImgFailed, setChocolateImgFailed] = useState(false);
 
-  const [selectedDate, setSelectedDate] = useState<string>(() => getDateString(0));
-  const [selectedTime, setSelectedTime] = useState<string>('');
+  const [initialDraft] = useState<BookingDraft>(() => readSavedDraft());
+  const [currentStep, setCurrentStep] = useState<number>(() =>
+    typeof initialDraft.currentStep === 'number' &&
+    initialDraft.currentStep >= 0 &&
+    initialDraft.currentStep <= 4
+      ? initialDraft.currentStep
+      : 0
+  );
+  const [stepError, setStepError] = useState('');
+
+  const [selectedDate, setSelectedDate] = useState<string>(
+    () => initialDraft.selectedDate || getDateString(0)
+  );
+  const [selectedTime, setSelectedTime] = useState<string>(
+    () => initialDraft.selectedTime || ''
+  );
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState('');
 
-  const [occasion, setOccasion] = useState<OccasionType>('Aniversário');
-  const [honoreeName, setHonoreeName] = useState('');
-  const [honoreeAge, setHonoreeAge] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [clientWhatsapp, setClientWhatsapp] = useState('');
+  const [occasion, setOccasion] = useState<OccasionType>(
+    () => initialDraft.occasion || 'Aniversário'
+  );
+  const [honoreeName, setHonoreeName] = useState(
+    () => initialDraft.honoreeName || ''
+  );
+  const [honoreeAge, setHonoreeAge] = useState(
+    () => initialDraft.honoreeAge || ''
+  );
+  const [clientName, setClientName] = useState(() => initialDraft.clientName || '');
+  const [clientWhatsapp, setClientWhatsapp] = useState(
+    () => initialDraft.clientWhatsapp || ''
+  );
 
-  const [neighborhood, setNeighborhood] = useState(NEIGHBORHOOD_ZONES[0].label);
-  const [streetAddress, setStreetAddress] = useState('');
-  const [propertyType, setPropertyType] = useState<PropertyType>('Casa');
-  const [referencePoint, setReferencePoint] = useState('');
+  const [cep, setCep] = useState(() => initialDraft.cep || '');
+  const [lookingUpCep, setLookingUpCep] = useState(false);
+  const [city, setCity] = useState(() => initialDraft.city || 'Recife');
+  const [neighborhood, setNeighborhood] = useState(
+    () => initialDraft.neighborhood || ''
+  );
+  const [streetAddress, setStreetAddress] = useState(
+    () => initialDraft.streetAddress || ''
+  );
+  const [propertyType, setPropertyType] = useState<PropertyType>(
+    () => initialDraft.propertyType || 'Casa'
+  );
+  const [referencePoint, setReferencePoint] = useState(
+    () => initialDraft.referencePoint || ''
+  );
+  const [addressPrice, setAddressPrice] = useState<AddressPriceResult | null>(null);
+  const [calculatingPrice, setCalculatingPrice] = useState(false);
+  const [priceHint, setPriceHint] = useState('');
+  const latestCalcIdRef = useRef(0);
 
-  const [giftOption, setGiftOption] = useState<GiftOption>('champanhe');
-  const [includeFireworks, setIncludeFireworks] = useState(true);
+  const [giftOption, setGiftOption] = useState<GiftOption>(
+    () => initialDraft.giftOption || 'champanhe'
+  );
+  const [includeFireworks, setIncludeFireworks] = useState<boolean>(
+    () => initialDraft.includeFireworks ?? true
+  );
 
-  const [song1, setSong1] = useState('');
-  const [song2, setSong2] = useState('');
-  const [song3, setSong3] = useState('');
+  const [song1, setSong1] = useState(() => initialDraft.song1 || '');
+  const [song2, setSong2] = useState(() => initialDraft.song2 || '');
+  const [song3, setSong3] = useState(() => initialDraft.song3 || '');
 
-  const [messageSource, setMessageSource] = useState<MessageSource>('empresa');
+  const [messageSource, setMessageSource] = useState<MessageSource>(
+    () => initialDraft.messageSource || 'empresa'
+  );
   const [participationMode, setParticipationMode] = useState<
     'Microfone ao vivo (até 5 pessoas)' | 'Envio de até 10 áudios (máx. 40s cada)' | 'Apenas locução do carro'
-  >('Microfone ao vivo (até 5 pessoas)');
-  const [customMessage, setCustomMessage] = useState('');
-  const [generatedScript, setGeneratedScript] = useState('');
-  const [messageTone, setMessageTone] = useState('Emocionante e caloroso');
+  >(
+    () =>
+      initialDraft.participationMode || 'Microfone ao vivo (até 5 pessoas)'
+  );
+  const [customMessage, setCustomMessage] = useState(
+    () => initialDraft.customMessage || ''
+  );
+  const [generatedScript, setGeneratedScript] = useState(
+    () => initialDraft.generatedScript || ''
+  );
+  const [messageTone, setMessageTone] = useState(
+    () => initialDraft.messageTone || 'Emocionante e caloroso'
+  );
   const [generatingAi, setGeneratingAi] = useState(false);
   const [aiError, setAiError] = useState('');
 
@@ -130,6 +285,65 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
+
+  useEffect(() => {
+    try {
+      const draft: BookingDraft = {
+        currentStep,
+        selectedDate,
+        selectedTime,
+        occasion,
+        honoreeName,
+        honoreeAge,
+        clientName,
+        clientWhatsapp,
+        cep,
+        city,
+        neighborhood,
+        streetAddress,
+        propertyType,
+        referencePoint,
+        giftOption,
+        includeFireworks,
+        song1,
+        song2,
+        song3,
+        messageSource,
+        participationMode,
+        customMessage,
+        generatedScript,
+        messageTone,
+      };
+      sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [
+    currentStep,
+    selectedDate,
+    selectedTime,
+    occasion,
+    honoreeName,
+    honoreeAge,
+    clientName,
+    clientWhatsapp,
+    cep,
+    city,
+    neighborhood,
+    streetAddress,
+    propertyType,
+    referencePoint,
+    giftOption,
+    includeFireworks,
+    song1,
+    song2,
+    song3,
+    messageSource,
+    participationMode,
+    customMessage,
+    generatedScript,
+    messageTone,
+  ]);
 
   const quickDates = useMemo(
     () => [
@@ -195,9 +409,90 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       });
   }, [refreshSignal]);
 
+  const runAddressCalculation = useCallback(
+    async (nextStreet: string, nextNeighborhood: string, nextCity: string) => {
+      const hasAddress =
+        nextNeighborhood.trim().length >= 2 || nextStreet.trim().length >= 4;
+      if (!hasAddress) {
+        setAddressPrice(null);
+        setPriceHint('');
+        return null;
+      }
+
+      const calcId = ++latestCalcIdRef.current;
+      setCalculatingPrice(true);
+      setPriceHint('');
+      try {
+        const result = await calculateAddressPrice({
+          streetAddress: nextStreet,
+          neighborhood: nextNeighborhood,
+          city: nextCity,
+        });
+        if (calcId !== latestCalcIdRef.current) return null;
+        setAddressPrice(result);
+        return result;
+      } catch {
+        if (calcId === latestCalcIdRef.current) {
+          setPriceHint(
+            'Não foi possível localizar a distância exata agora; informe bairro e cidade para estimar.'
+          );
+        }
+        return null;
+      } finally {
+        if (calcId === latestCalcIdRef.current) {
+          setCalculatingPrice(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (neighborhood.trim().length >= 2 || streetAddress.trim().length >= 4) {
+        runAddressCalculation(streetAddress, neighborhood, city);
+      } else {
+        setAddressPrice(null);
+      }
+    }, 550);
+    return () => clearTimeout(timer);
+  }, [streetAddress, neighborhood, city, runAddressCalculation]);
+
+  const handleCepChange = async (raw: string) => {
+    const formatted = formatCepInput(raw);
+    setCep(formatted);
+    const digits = formatted.replace(/\D/g, '');
+    if (digits.length === 8) {
+      setLookingUpCep(true);
+      setPriceHint('');
+      const found = await lookupCep(digits);
+      setLookingUpCep(false);
+      if (found) {
+        const nextStreet = found.streetAddress
+          ? found.streetAddress
+          : streetAddress;
+        const nextNeighborhood = found.neighborhood || neighborhood;
+        const nextCity = found.city || city;
+        if (found.streetAddress) setStreetAddress(found.streetAddress);
+        if (found.neighborhood) setNeighborhood(found.neighborhood);
+        if (found.city) setCity(found.city);
+        await runAddressCalculation(nextStreet, nextNeighborhood, nextCity);
+      } else {
+        setPriceHint(
+          'CEP não encontrado automaticamente. Digite cidade, bairro e rua abaixo.'
+        );
+      }
+    }
+  };
+
   const pricing = useMemo(
-    () => calculatePrices(neighborhood, giftOption, includeFireworks),
-    [neighborhood, giftOption, includeFireworks]
+    () =>
+      calculatePrices(
+        addressPrice?.basePrice ?? neighborhood,
+        giftOption,
+        includeFireworks
+      ),
+    [addressPrice, neighborhood, giftOption, includeFireworks]
   );
 
   const handleGenerateAiScript = async () => {
@@ -226,29 +521,124 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     }
   };
 
+  const isStepCompleted = useCallback(
+    (stepIdx: number): boolean => {
+      if (stepIdx === 0) return Boolean(selectedDate && selectedTime);
+      if (stepIdx === 1) {
+        return Boolean(
+          honoreeName.trim() && clientName.trim() && clientWhatsapp.trim()
+        );
+      }
+      if (stepIdx === 2) {
+        return Boolean(neighborhood.trim() && streetAddress.trim());
+      }
+      if (stepIdx === 3) {
+        return Boolean(song1.trim() && song2.trim() && song3.trim());
+      }
+      if (stepIdx === 4) {
+        return messageSource === 'empresa' || Boolean(customMessage.trim());
+      }
+      return false;
+    },
+    [
+      selectedDate,
+      selectedTime,
+      honoreeName,
+      clientName,
+      clientWhatsapp,
+      neighborhood,
+      streetAddress,
+      song1,
+      song2,
+      song3,
+      messageSource,
+      customMessage,
+    ]
+  );
+
+  const validateSingleStep = (stepIdx: number): string | null => {
+    if (stepIdx === 0 && !selectedTime) {
+      return 'Escolha um horário disponível antes de avançar.';
+    }
+    if (
+      stepIdx === 1 &&
+      (!honoreeName.trim() || !clientName.trim() || !clientWhatsapp.trim())
+    ) {
+      return 'Preencha o nome do homenageado, seu nome e seu WhatsApp.';
+    }
+    if (stepIdx === 2 && (!neighborhood.trim() || !streetAddress.trim())) {
+      return 'Informe o bairro, a rua e o número do endereço da homenagem.';
+    }
+    if (
+      stepIdx === 3 &&
+      (!song1.trim() || !song2.trim() || !song3.trim())
+    ) {
+      return 'Preencha os nomes das 3 músicas que devem tocar no carro.';
+    }
+    if (stepIdx === 4 && messageSource === 'cliente' && !customMessage.trim()) {
+      return 'Digite o texto da mensagem ou selecione para a empresa gerar.';
+    }
+    return null;
+  };
+
+  const handleGoToStep = (targetStep: number) => {
+    setStepError('');
+    setSubmitError('');
+    setCurrentStep(Math.max(0, Math.min(4, targetStep)));
+  };
+
+  const handleNextStep = () => {
+    const err = validateSingleStep(currentStep);
+    if (err) {
+      setStepError(err);
+      return;
+    }
+    setStepError('');
+    setSubmitError('');
+    setCurrentStep((prev) => Math.min(4, prev + 1));
+  };
+
+  const handlePrevStep = () => {
+    setStepError('');
+    setSubmitError('');
+    setCurrentStep((prev) => Math.max(0, prev - 1));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError('');
+    setStepError('');
 
     if (!selectedTime) {
+      setCurrentStep(0);
       setSubmitError('Escolha um horário disponível na etapa 01.');
       return;
     }
     if (!honoreeName.trim() || !clientName.trim() || !clientWhatsapp.trim()) {
-      setSubmitError('Preencha o nome do homenageado, seu nome e seu WhatsApp.');
+      setCurrentStep(1);
+      setSubmitError(
+        'Preencha o nome do homenageado, seu nome e seu WhatsApp na etapa 02.'
+      );
       return;
     }
-    if (!streetAddress.trim()) {
-      setSubmitError('Informe a rua e o número do endereço da homenagem.');
+    if (!neighborhood.trim() || !streetAddress.trim()) {
+      setCurrentStep(2);
+      setSubmitError(
+        'Informe o bairro, a rua e o número do endereço na etapa 03 para calcular o valor.'
+      );
       return;
     }
     if (!song1.trim() || !song2.trim() || !song3.trim()) {
-      setSubmitError('Preencha os nomes das 3 músicas que devem tocar no carro.');
+      setCurrentStep(3);
+      setSubmitError(
+        'Preencha os nomes das 3 músicas que devem tocar no carro na etapa 04.'
+      );
       return;
     }
     if (messageSource === 'cliente' && !customMessage.trim()) {
+      setCurrentStep(4);
       setSubmitError(
-        'Digite o texto da mensagem ou selecione para a empresa gerar.'
+        'Digite o texto da mensagem ou selecione para a empresa gerar na etapa 05.'
       );
       return;
     }
@@ -270,6 +660,25 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
 
     setSubmitting(true);
     try {
+      let resolvedCalc = addressPrice;
+      if (!resolvedCalc) {
+        resolvedCalc = await runAddressCalculation(
+          streetAddress,
+          neighborhood,
+          city
+        );
+      }
+
+      const fullNeighborhoodLabel =
+        city.trim() && city.trim().toLowerCase() !== 'recife'
+          ? `${neighborhood.trim()} — ${city.trim()}`
+          : neighborhood.trim();
+
+      const terrainDetail =
+        resolvedCalc && resolvedCalc.terrainReasons.length > 0
+          ? ` · Relevo/Acesso: ${resolvedCalc.terrainReasons.join(', ')}`
+          : '';
+
       const booking = await createBookingApi({
         date: selectedDate,
         time: selectedTime,
@@ -278,7 +687,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         honoreeAge: honoreeAge.trim(),
         clientName: clientName.trim(),
         clientWhatsapp: clientWhatsapp.trim(),
-        neighborhood,
+        neighborhood: fullNeighborhoodLabel,
         streetAddress: streetAddress.trim(),
         propertyType,
         referencePoint: referencePoint.trim(),
@@ -288,11 +697,19 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         messageSource,
         customMessage: customMessage.trim(),
         generatedScript: generatedScript.trim(),
-        notes: `Participação escolhida: ${participationMode}`,
+        basePrice: resolvedCalc?.basePrice,
+        notes: `Participação escolhida: ${participationMode}${
+          resolvedCalc?.distanceKm ? ` · Distância estimada: ${resolvedCalc.distanceKm} km` : ''
+        }${terrainDetail}`,
         lgpdConsent: true,
       });
       setConfirmedBooking(booking);
       setHumanVerified(false);
+      try {
+        sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
       onBookingCreated(booking);
       await loadSlots(selectedDate);
     } catch (err) {
@@ -307,11 +724,18 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
 
   const handleResetBooking = () => {
     setConfirmedBooking(null);
+    setCurrentStep(0);
+    setStepError('');
+    setSubmitError('');
     setSelectedTime('');
     setHonoreeName('');
     setHonoreeAge('');
+    setCep('');
+    setCity('Recife');
+    setNeighborhood('');
     setStreetAddress('');
     setReferencePoint('');
+    setAddressPrice(null);
     setSong1('');
     setSong2('');
     setSong3('');
@@ -319,6 +743,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     setGeneratedScript('');
     setGiftOption('champanhe');
     setIncludeFireworks(true);
+    try {
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     loadSlots(selectedDate);
   };
 
@@ -340,59 +769,71 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     ]
       .filter(Boolean)
       .join('\n');
-    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+    return buildCompanyWhatsappUrl(text);
   };
 
   return (
     <main className="pb-20">
       {/* Hero Split */}
-      <section className="max-w-[1280px] mx-auto px-4 sm:px-8 pt-10 pb-12">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-          <div className="lg:col-span-6 flex flex-col justify-between py-2">
+      <section className="max-w-[1280px] mx-auto px-4 sm:px-8 pt-5 sm:pt-10 pb-7 sm:pb-12">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-stretch">
+          <div className="lg:col-span-6 flex flex-col justify-between py-1 sm:py-2">
             <div>
-              <p className="text-sm font-medium text-[#991B1B] mb-3">
-                Carro de Mensagem ao Vivo · Recife e Região Metropolitana
+              <p className="text-xs sm:text-sm font-medium text-[#991B1B] mb-2 sm:mb-3">
+                Carro de Mensagem ao Vivo · Recife e Região
               </p>
               <h1
-                className="font-display font-semibold tracking-tight text-[#171412] leading-[1.08] mb-5"
+                className="font-display font-semibold tracking-tight text-[#171412] leading-[1.08] mb-3 sm:mb-5"
                 style={{
-                  fontSize: 'clamp(2.25rem, 4vw, 3.5rem)',
+                  fontSize: 'clamp(1.75rem, 3.8vw, 3.35rem)',
                   textWrap: 'balance',
                 }}
               >
-                Surpreenda quem você ama com música, voz ao vivo e horário reservado na hora.
+                Mensagem ao Vivo Desperte Corações: marcante para quem recebe, inesquecível para quem presenteia.
               </h1>
-              <p className="text-base sm:text-lg text-[#575049] leading-relaxed max-w-xl mb-8">
-                Consulte os horários disponíveis em tempo real, escolha champanhe ou chocolate, fogos, suas 3 músicas preferidas e o roteiro da locução para aniversário, reconciliação ou declaração.
+              <p className="text-sm sm:text-lg text-[#575049] leading-relaxed max-w-xl mb-5 sm:mb-8">
+                Transforme aniversários, declarações e reconciliações em momentos de pura emoção na porta de quem você ama. Escolha a data em tempo real, selecione suas 3 músicas, defina o brinde entre champanhe ou chocolate, conte com 3 queimas de fogos e personalize a locução ao vivo.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2.5 sm:gap-3">
               <a
                 href="#agendar"
-                className="px-6 py-3 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap shrink-0"
+                className="col-span-2 sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-xl sm:rounded-lg transition-colors whitespace-nowrap"
               >
+                <Calendar className="w-4 h-4 sm:hidden" />
                 Escolher Data e Horário
               </a>
               <a
-                href="#instagram"
-                className="inline-flex items-center gap-2 px-5 py-3 text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-lg transition-colors whitespace-nowrap shrink-0"
+                href={buildCompanyWhatsappUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:px-5 sm:py-3 text-xs sm:text-sm font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-xl sm:rounded-lg transition-colors whitespace-nowrap"
               >
-                <Video className="w-4 h-4 text-[#991B1B]" />
-                Vídeos no @despertecoracoes
+                <MessageCircle className="w-4 h-4 shrink-0" />
+                <span className="sm:hidden">WhatsApp</span>
+                <span className="hidden sm:inline">Atendimento no WhatsApp</span>
+              </a>
+              <a
+                href="#instagram"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 sm:px-5 sm:py-3 text-xs sm:text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-xl sm:rounded-lg transition-colors whitespace-nowrap"
+              >
+                <Video className="w-4 h-4 text-[#991B1B] shrink-0" />
+                <span className="sm:hidden">Ver Vídeos</span>
+                <span className="hidden sm:inline">Vídeos no @despertecoracoes</span>
               </a>
             </div>
           </div>
 
           <div className="lg:col-span-6">
-            <div className="relative h-full min-h-[300px] sm:min-h-[380px] rounded-xl overflow-hidden border border-[#E6E2DC] bg-[#EDE9E2]">
+            <div className="relative h-full min-h-[240px] sm:min-h-[340px] max-h-[380px] sm:max-h-[540px] rounded-xl overflow-hidden border border-[#E6E2DC] bg-[#EDE9E2]">
               {!heroImgFailed ? (
                 <img
                   src={HERO_IMAGE}
-                  alt="Carro de mensagem ao vivo preparado com flores e iluminação suave ao entardecer"
+                  alt="Carro de mensagem ao vivo Desperte Corações decorado com balões e faixa de Parabéns"
                   referrerPolicy="no-referrer"
                   onError={() => setHeroImgFailed(true)}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover object-center"
                 />
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-[#F3EFE8] to-[#E6DFD5]">
@@ -402,212 +843,135 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   </p>
                 </div>
               )}
-              <div className="absolute inset-x-0 bottom-0 p-5 bg-gradient-to-t from-black/80 via-black/40 to-transparent">
-                <p className="text-sm font-medium text-white">
-                  Locução ao vivo no local · Som de alta definição · Entrega de mimos
-                </p>
-              </div>
             </div>
-          </div>
-        </div>
-
-        {/* 4-column Service Strip */}
-        <div className="mt-10 pt-8 border-t border-[#E6E2DC] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div>
-            <p className="text-sm font-semibold text-[#171412] mb-1">
-              01. Locução e Microfone
-            </p>
-            <p className="text-sm text-[#575049]">
-              Microfone para até 5 pessoas ao vivo ou envio de até 10 áudios de até 40s cada.
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-[#171412] mb-1">
-              02. 3 Músicas Exclusivas
-            </p>
-            <p className="text-sm text-[#575049]">
-              Você escolhe a trilha sonora completa para tocar durante a apresentação.
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-[#171412] mb-1">
-              03. Champanhe ou Chocolate
-            </p>
-            <p className="text-sm text-[#575049]">
-              Adicione espumante com taças ou caixa artesanal entregue no momento da surpresa.
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-[#171412] mb-1">
-              04. 3 Queimas de Fogos Inclusas
-            </p>
-            <p className="text-sm text-[#575049]">
-              Já incluso no pacote: 1x 12x1, Chuva de Prata e Árvore de Natal (Vulcão).
-            </p>
           </div>
         </div>
       </section>
 
-      {/* Mimos Section */}
+      {/* Mimos Section - Compact Icon Tiles */}
       <section
         id="mimos"
-        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-12 border-t border-[#E6E2DC]"
+        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-6 sm:py-8 border-t border-[#E6E2DC]"
       >
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-          <div>
-            <h2 className="font-display text-2xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
-              Mimos e Efeitos para Completar a Surpresa
-            </h2>
-            <p className="text-sm sm:text-base text-[#575049] mt-1">
-              Selecione no formulário abaixo para incluir no seu carro de mensagem.
-            </p>
-          </div>
-          <p className="text-sm text-[#575049] tabular-nums">
-            A partir de {formatBRL(MINIMUM_BASE_PRICE)} no Ipsep · Valor conforme distância
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 mb-4">
+          <h2 className="font-display text-lg sm:text-2xl font-semibold text-[#171412] tracking-tight">
+            Brindes e Fogos do Pacote
+          </h2>
+          <p className="text-xs sm:text-sm text-[#575049]">
+            Toque para selecionar e ir ao agendamento
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white border border-[#E6E2DC] rounded-xl overflow-hidden flex flex-col">
-            <div className="aspect-[4/3] bg-[#F3F1ED] overflow-hidden">
-              {!champagneImgFailed ? (
-                <img
-                  src={CHAMPAGNE_IMAGE}
-                  alt="Garrafa de champanhe com duas taças de cristal e caixa presente"
-                  referrerPolicy="no-referrer"
-                  onError={() => setChampagneImgFailed(true)}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Gift className="w-8 h-8 text-[#991B1B]" />
-                </div>
-              )}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+          <button
+            type="button"
+            onClick={() => {
+              setGiftOption('champanhe');
+              document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className={`p-3 sm:p-4 rounded-xl border text-left transition-colors flex items-center gap-3 ${
+              giftOption === 'champanhe'
+                ? 'bg-[#991B1B]/5 border-[#991B1B]'
+                : 'bg-white border-[#E6E2DC] hover:border-[#CFC8BE]'
+            }`}
+          >
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#991B1B]/10 text-[#991B1B] flex items-center justify-center shrink-0">
+              <Wine className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex items-baseline justify-between gap-3 mb-2">
-                  <h3 className="font-semibold text-base text-[#171412]">
-                    Champanhe (Espumante)
-                  </h3>
-                  <span className="font-mono text-xs font-semibold text-[#16A34A]">
-                    Incluso no pacote
-                  </span>
-                </div>
-                <p className="text-sm text-[#575049]">
-                  Espumante gelado já incluso no valor do pacote (a partir de R$ 250,00 no Ipsep).
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setGiftOption('champanhe');
-                  document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="mt-4 w-full py-2.5 px-4 text-sm font-medium text-[#171412] bg-[#FAF9F7] hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors"
-              >
-                Escolher Champanhe
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white border border-[#E6E2DC] rounded-xl overflow-hidden flex flex-col">
-            <div className="aspect-[4/3] bg-[#F3F1ED] overflow-hidden">
-              {!chocolateImgFailed ? (
-                <img
-                  src={CHOCOLATE_IMAGE}
-                  alt="Caixa artesanal de bombons e trufas com laço de cetim"
-                  referrerPolicy="no-referrer"
-                  onError={() => setChocolateImgFailed(true)}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <Gift className="w-8 h-8 text-[#991B1B]" />
-                </div>
-              )}
-            </div>
-            <div className="p-5 flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex items-baseline justify-between gap-3 mb-2">
-                  <h3 className="font-semibold text-base text-[#171412]">
-                    Caixa de Chocolates Finos
-                  </h3>
-                  <span className="font-mono text-xs font-semibold text-[#16A34A]">
-                    Incluso no pacote
-                  </span>
-                </div>
-                <p className="text-sm text-[#575049]">
-                  Caixa artesanal de chocolates já inclusa como sua opção de brinde no pacote.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setGiftOption('chocolate');
-                  document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="mt-4 w-full py-2.5 px-4 text-sm font-medium text-[#171412] bg-[#FAF9F7] hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors"
-              >
-                Escolher Chocolates
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white border border-[#E6E2DC] rounded-xl p-6 flex flex-col justify-between">
-            <div>
-              <p className="text-xs font-medium text-[#575049] mb-2">
-                Fogos Inclusos & Segundo Brinde
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-[#171412] truncate">
+                Champanhe
               </p>
-              <h3 className="font-display text-xl font-semibold text-[#171412] mb-3">
-                3 Queimas de Fogos já inclusas no pacote
-              </h3>
-              <p className="text-sm text-[#575049] leading-relaxed mb-6">
-                Além de 1 mimo à escolha (Champanhe ou Chocolate), o pacote já inclui 3 queimas de fogos: 1x 12x1, Chuva de Prata e Árvore de Natal (Vulcão).
+              <p className="text-[11px] sm:text-xs font-medium text-[#16A34A]">
+                Incluso
               </p>
-
-              <div className="space-y-3 pt-4 border-t border-[#E6E2DC] text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-[#575049]">3 Fogos (12x1, Chuva de Prata, Vulcão)</span>
-                  <span className="font-mono text-xs font-semibold text-[#16A34A]">
-                    Incluso
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#575049]">Segundo mimo (os dois juntos)</span>
-                  <span className="font-mono font-medium text-[#171412] tabular-nums">
-                    + {formatBRL(65)}
-                  </span>
-                </div>
-              </div>
             </div>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setGiftOption('ambos');
-                setIncludeFireworks(true);
-                document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="mt-6 w-full py-2.5 px-4 text-sm font-medium text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors"
-            >
-              Escolher os Dois Mimos
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setGiftOption('chocolate');
+              document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className={`p-3 sm:p-4 rounded-xl border text-left transition-colors flex items-center gap-3 ${
+              giftOption === 'chocolate'
+                ? 'bg-[#991B1B]/5 border-[#991B1B]'
+                : 'bg-white border-[#E6E2DC] hover:border-[#CFC8BE]'
+            }`}
+          >
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#991B1B]/10 text-[#991B1B] flex items-center justify-center shrink-0">
+              <Gift className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-[#171412] truncate">
+                Chocolates
+              </p>
+              <p className="text-[11px] sm:text-xs font-medium text-[#16A34A]">
+                Incluso
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setGiftOption('ambos');
+              document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className={`p-3 sm:p-4 rounded-xl border text-left transition-colors flex items-center gap-3 ${
+              giftOption === 'ambos'
+                ? 'bg-[#991B1B]/5 border-[#991B1B]'
+                : 'bg-white border-[#E6E2DC] hover:border-[#CFC8BE]'
+            }`}
+          >
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#991B1B]/10 text-[#991B1B] flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-[#171412] truncate">
+                Os Dois Mimos
+              </p>
+              <p className="text-[11px] sm:text-xs font-mono font-semibold text-[#991B1B]">
+                + {formatBRL(30)}
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setIncludeFireworks(true);
+              document.getElementById('agendar')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            className="p-3 sm:p-4 rounded-xl border border-[#E6E2DC] bg-white hover:border-[#CFC8BE] text-left transition-colors flex items-center gap-3"
+          >
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-[#991B1B]/10 text-[#991B1B] flex items-center justify-center shrink-0">
+              <Flame className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-[#171412] truncate">
+                3 Fogos Inclusos
+              </p>
+              <p className="text-[11px] sm:text-xs text-[#575049] truncate">
+                12x1, Chuva e Vulcão
+              </p>
+            </div>
+          </button>
         </div>
       </section>
 
       {/* Interactive Online Automatic Booking */}
       <section
         id="agendar"
-        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-12 border-t border-[#E6E2DC]"
+        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-8 sm:py-12 border-t border-[#E6E2DC]"
       >
-        <div className="mb-8">
-          <h2 className="font-display text-2xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
+        <div className="mb-5 sm:mb-8">
+          <h2 className="font-display text-xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
             Agendamento Automático Online
           </h2>
-          <p className="text-sm sm:text-base text-[#575049] mt-1">
-            Os horários abaixo são atualizados automaticamente conforme nossa agenda ao vivo.
+          <p className="text-xs sm:text-base text-[#575049] mt-1">
+            Horários atualizados ao vivo em 5 etapas simples.
           </p>
         </div>
 
@@ -681,12 +1045,68 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
           </div>
         ) : (
           <form
+            noValidate
             onSubmit={handleSubmit}
             className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
           >
-            {/* Form Steps */}
-            <div className="lg:col-span-8 space-y-10 bg-white border border-[#E6E2DC] rounded-xl p-6 sm:p-8">
-              {/* Step 1: Date and Live Available Times */}
+            {/* Multi-Step Slide Wizard */}
+            <div className="lg:col-span-8 bg-white border border-[#E6E2DC] rounded-xl p-4 sm:p-8 flex flex-col justify-between">
+              {/* Slide Stepper Header */}
+              <div className="mb-5 pb-4 border-b border-[#E6E2DC]">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <span className="font-mono text-xs font-semibold text-[#991B1B]">
+                    Etapa {currentStep + 1} de {BOOKING_SLIDES.length}
+                  </span>
+                  <span className="text-[11px] sm:text-xs text-[#575049]">
+                    Dados salvos automaticamente
+                  </span>
+                </div>
+
+                <div className="w-full h-1.5 bg-[#F3F1ED] rounded-full overflow-hidden mb-3.5">
+                  <div
+                    className="h-full bg-[#991B1B] transition-all duration-300"
+                    style={{
+                      width: `${((currentStep + 1) / BOOKING_SLIDES.length) * 100}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                  {BOOKING_SLIDES.map((slide) => {
+                    const isActive = currentStep === slide.id;
+                    const done = isStepCompleted(slide.id);
+                    return (
+                      <button
+                        key={slide.id}
+                        type="button"
+                        onClick={() => handleGoToStep(slide.id)}
+                        className={`px-1.5 sm:px-2.5 py-2 rounded-lg border text-center sm:text-left transition-colors ${
+                          isActive
+                            ? 'bg-[#991B1B] border-[#991B1B] text-white'
+                            : done
+                              ? 'bg-[#16A34A]/5 border-[#16A34A]/30 text-[#171412] hover:border-[#16A34A]'
+                              : 'bg-[#FAF9F7] border-[#E6E2DC] text-[#575049] hover:text-[#171412] hover:border-[#CFC8BE]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center sm:justify-between gap-1">
+                          <span className="font-mono text-[10px] sm:text-[11px] font-semibold">
+                            {slide.code}
+                          </span>
+                          {done && !isActive && (
+                            <Check className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#16A34A] shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[10px] sm:text-xs font-medium truncate mt-0.5">
+                          {slide.shortLabel}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Slide 1: Date and Live Available Times */}
+              {currentStep === 0 && (
               <div>
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
@@ -796,9 +1216,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   })}
                 </div>
               </div>
+              )}
 
-              {/* Step 2: Occasion, Honoree, Age, Client */}
-              <div className="pt-8 border-t border-[#E6E2DC]">
+              {/* Slide 2: Occasion, Honoree, Age, Client */}
+              {currentStep === 1 && (
+              <div>
                 <div className="flex items-center gap-2 mb-4">
                   <Heart className="w-5 h-5 text-[#991B1B]" />
                   <h3 className="text-lg font-semibold text-[#171412]">
@@ -905,36 +1327,103 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* Step 3: Address */}
-              <div className="pt-8 border-t border-[#E6E2DC]">
-                <div className="flex items-center gap-2 mb-4">
-                  <MapPin className="w-5 h-5 text-[#991B1B]" />
-                  <h3 className="text-lg font-semibold text-[#171412]">
-                    03. Endereço da Homenagem
-                  </h3>
+              {/* Slide 3: Address & Automatic Distance Pricing */}
+              {currentStep === 2 && (
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-[#991B1B]" />
+                    <h3 className="text-lg font-semibold text-[#171412]">
+                      03. Endereço da Homenagem (Cálculo Automático)
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      runAddressCalculation(streetAddress, neighborhood, city)
+                    }
+                    disabled={calculatingPrice}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#991B1B] hover:text-[#7F1D1D] py-1.5 px-3 rounded-lg border border-[#E6E2DC] bg-[#FAF9F7] disabled:opacity-60"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${calculatingPrice ? 'animate-spin' : ''}`}
+                    />
+                    {calculatingPrice ? 'Calculando...' : 'Calcular Valor'}
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-                  <div className="sm:col-span-12">
+                  <div className="sm:col-span-4">
+                    <label
+                      htmlFor="cep-input"
+                      className="block text-xs font-medium text-[#575049] mb-1.5"
+                    >
+                      CEP (opcional — preenche na hora)
+                    </label>
+                    <input
+                      id="cep-input"
+                      type="text"
+                      inputMode="numeric"
+                      value={cep}
+                      onChange={(e) => handleCepChange(e.target.value)}
+                      placeholder="Ex: 51190-040"
+                      className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B] font-mono"
+                    />
+                    {lookingUpCep && (
+                      <p className="text-[11px] text-[#575049] mt-1">
+                        Buscando CEP...
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-4">
+                    <label
+                      htmlFor="city-input"
+                      className="block text-xs font-medium text-[#575049] mb-1.5"
+                    >
+                      Cidade *
+                    </label>
+                    <input
+                      id="city-input"
+                      type="text"
+                      list="cities-list"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder="Ex: Recife ou Olinda"
+                      className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                      required
+                    />
+                    <datalist id="cities-list">
+                      {SUGGESTED_CITIES.map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="sm:col-span-4">
                     <label
                       htmlFor="neighborhood"
                       className="block text-xs font-medium text-[#575049] mb-1.5"
                     >
-                      Bairro / Região (a partir de R$ 250,00 no Ipsep — varia pela distância) *
+                      Bairro *
                     </label>
-                    <select
+                    <input
                       id="neighborhood"
+                      type="text"
+                      list="neighborhoods-list"
                       value={neighborhood}
                       onChange={(e) => setNeighborhood(e.target.value)}
+                      placeholder="Ex: Boa Viagem, Bairro Novo..."
                       className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
-                    >
-                      {NEIGHBORHOOD_ZONES.map((zone) => (
-                        <option key={zone.id} value={zone.label}>
-                          {zone.label} — {formatBRL(zone.basePrice)}
-                        </option>
+                      required
+                    />
+                    <datalist id="neighborhoods-list">
+                      {SUGGESTED_NEIGHBORHOODS.map((b) => (
+                        <option key={b} value={b} />
                       ))}
-                    </select>
+                    </datalist>
                   </div>
 
                   <div className="sm:col-span-8">
@@ -949,7 +1438,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                       type="text"
                       value={streetAddress}
                       onChange={(e) => setStreetAddress(e.target.value)}
-                      placeholder="Ex: Travessa do Gusmão, 91"
+                      placeholder="Ex: Rua Rio Amazonas, 120"
                       className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
                       required
                     />
@@ -992,11 +1481,51 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                       className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
                     />
                   </div>
+
+                  <div className="sm:col-span-12">
+                    {calculatingPrice ? (
+                      <div className="p-3.5 rounded-lg bg-[#FAF9F7] border border-[#E6E2DC] text-xs text-[#575049]">
+                        Analisando rota, relevo e calculando automaticamente o valor para o endereço...
+                      </div>
+                    ) : addressPrice ? (
+                      <div className="p-3.5 rounded-lg bg-[#16A34A]/5 border border-[#16A34A]/25 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <div className="space-y-0.5">
+                          <p className="text-[#171412] font-medium">
+                            Endereço localizado:{' '}
+                            <strong className="font-semibold">
+                              {addressPrice.resolvedNeighborhood}
+                              {addressPrice.resolvedCity
+                                ? ` (${addressPrice.resolvedCity})`
+                                : ''}
+                            </strong>
+                            {addressPrice.distanceKm !== null
+                              ? ` · Trajeto estimado ~${addressPrice.distanceKm} km`
+                              : ''}
+                          </p>
+                          {addressPrice.terrainAdjustment > 0 && (
+                            <p className="text-[#575049]">
+                              Calculado considerando distância, relevo e condição de acesso do local.
+                            </p>
+                          )}
+                        </div>
+                        <span className="font-mono text-sm font-semibold text-[#16A34A] tabular-nums">
+                          Pacote para este endereço: {formatBRL(addressPrice.basePrice)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 rounded-lg bg-[#FAF9F7] border border-[#E6E2DC] text-xs text-[#575049]">
+                        {priceHint ||
+                          'Informe o CEP ou preencha a cidade, bairro e rua acima para calcular automaticamente o valor do pacote.'}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+              )}
 
-              {/* Step 4: Champagne/Chocolate, Fireworks, 3 Songs */}
-              <div className="pt-8 border-t border-[#E6E2DC]">
+              {/* Slide 4: Champagne/Chocolate, Fireworks, 3 Songs */}
+              {currentStep === 3 && (
+              <div>
                 <div className="flex items-center gap-2 mb-4">
                   <Gift className="w-5 h-5 text-[#991B1B]" />
                   <h3 className="text-lg font-semibold text-[#171412]">
@@ -1125,9 +1654,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* Step 5: Message for the car theme */}
-              <div className="pt-8 border-t border-[#E6E2DC]">
+              {/* Slide 5: Message for the car theme */}
+              {currentStep === 4 && (
+              <div>
                 <div className="flex items-center gap-2 mb-4">
                   <Sparkles className="w-5 h-5 text-[#991B1B]" />
                   <h3 className="text-lg font-semibold text-[#171412]">
@@ -1289,10 +1820,59 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   </div>
                 </div>
               </div>
+              )}
+
+              {/* Slide Navigation Footer */}
+              <div className="mt-8 pt-5 border-t border-[#E6E2DC] space-y-3">
+                {stepError && (
+                  <p className="text-sm text-[#DC2626] bg-[#DC2626]/5 border border-[#DC2626]/20 rounded-lg px-3.5 py-2.5">
+                    {stepError}
+                  </p>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {currentStep > 0 ? (
+                    <button
+                      type="button"
+                      onClick={handlePrevStep}
+                      className="inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-[#171412] bg-[#FAF9F7] hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      Voltar
+                    </button>
+                  ) : (
+                    <span className="text-xs text-[#575049]">
+                      Selecione a data e o horário para continuar
+                    </span>
+                  )}
+
+                  {currentStep < BOOKING_SLIDES.length - 1 ? (
+                    <button
+                      type="button"
+                      onClick={handleNextStep}
+                      className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors ml-auto"
+                    >
+                      Próxima Etapa
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <a
+                      href="#booking-summary"
+                      className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-semibold text-[#16A34A] bg-[#16A34A]/10 hover:bg-[#16A34A]/15 border border-[#16A34A]/25 rounded-lg transition-colors ml-auto lg:hidden"
+                    >
+                      Revisar Resumo e Confirmar
+                      <ChevronRight className="w-4 h-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Sticky Summary Sidebar */}
-            <aside className="lg:col-span-4 lg:sticky lg:top-24 bg-white border border-[#E6E2DC] rounded-xl p-6">
+            <aside
+              id="booking-summary"
+              className="lg:col-span-4 lg:sticky lg:top-24 bg-white border border-[#E6E2DC] rounded-xl p-6"
+            >
               <h3 className="font-display text-xl font-semibold text-[#171412] mb-4">
                 Resumo da Homenagem
               </h3>
@@ -1326,10 +1906,14 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               </div>
 
               <div className="space-y-2.5 text-sm py-5 border-b border-[#E6E2DC]">
-                <div className="flex justify-between">
-                  <span className="text-[#575049]">Pacote base + região</span>
-                  <span className="font-mono text-[#171412] tabular-nums">
-                    {formatBRL(pricing.basePrice)}
+                <div className="flex justify-between gap-2">
+                  <span className="text-[#575049]">Pacote para o endereço</span>
+                  <span className="font-mono text-[#171412] tabular-nums text-right">
+                    {addressPrice
+                      ? formatBRL(pricing.basePrice)
+                      : calculatingPrice
+                        ? 'Calculando...'
+                        : 'A calcular'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1351,7 +1935,9 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 <div className="flex justify-between items-baseline pt-2 border-t border-[#E6E2DC]">
                   <span className="font-semibold text-[#171412]">Total previsto</span>
                   <span className="font-mono text-2xl font-semibold text-[#991B1B] tabular-nums">
-                    {formatBRL(pricing.totalPrice)}
+                    {addressPrice
+                      ? formatBRL(pricing.totalPrice)
+                      : 'Informe o endereço'}
                   </span>
                 </div>
               </div>
@@ -1432,12 +2018,24 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   Ao confirmar, você entra com Google ou cria sua conta com verificação por e-mail para proteger seus dados.
                 </p>
               )}
+
+              <div className="mt-4 pt-4 border-t border-[#E6E2DC]">
+                <a
+                  href={buildCompanyWhatsappUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-semibold text-[#16A34A] bg-[#16A34A]/10 hover:bg-[#16A34A]/15 border border-[#16A34A]/25 rounded-lg transition-colors"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Atendimento Direto no WhatsApp {COMPANY_WHATSAPP_DISPLAY}
+                </a>
+              </div>
             </aside>
           </form>
         )}
       </section>
 
-      {/* Instagram @despertecoracoes Showcase */}
+      {/* Instagram @despertecoracoes Video Cuts Showcase */}
       <section
         id="instagram"
         className="max-w-[1280px] mx-auto px-4 sm:px-8 py-12 border-t border-[#E6E2DC]"
@@ -1445,13 +2043,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
             <p className="text-xs font-medium text-[#991B1B] mb-1.5">
-              Instagram Oficial · @despertecoracoes
+              Vídeos Reais · @despertecoracoes
             </p>
             <h2 className="font-display text-2xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
-              Emoções Reais em Vídeo (@despertecoracoes)
+              Cortes de Homenagens Reais ao Vivo
             </h2>
             <p className="text-sm sm:text-base text-[#575049] mt-1">
-              Confira nossas homenagens ao vivo, entregas de champanhe e queimas de fogos em Recife e Região Metropolitana.
+              Assista aqui no site momentos reais de emoção, declarações, aniversários e reconciliações em Recife e Região Metropolitana.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
@@ -1462,23 +2060,65 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors whitespace-nowrap"
             >
               <Video className="w-4 h-4" />
-              Ver Reels Mais Vistos
+              Ver Mais no @despertecoracoes
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
             <a
-              href="https://www.instagram.com/despertecoracoes/"
+              href={buildCompanyWhatsappUrl()}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-[#171412] bg-white border border-[#E6E2DC] hover:border-[#CFC8BE] rounded-lg transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors whitespace-nowrap"
             >
-              Seguir @despertecoracoes
-              <ExternalLink className="w-3.5 h-3.5" />
+              <MessageCircle className="w-4 h-4" />
+              Falar no WhatsApp
             </a>
           </div>
         </div>
 
-        {instagramPosts.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* 5 Cortes de Vídeos Reais em Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {HIGHLIGHT_VIDEO_CUTS.map((clip) => (
+            <article
+              key={clip.id}
+              className="bg-white border border-[#E6E2DC] rounded-xl overflow-hidden flex flex-col"
+            >
+              <div className="aspect-[9/16] bg-[#171412] relative overflow-hidden">
+                <video
+                  controls
+                  playsInline
+                  preload="metadata"
+                  poster={clip.posterSrc}
+                  className="w-full h-full object-cover"
+                >
+                  <source src={clip.videoSrc} type="video/mp4" />
+                  Seu navegador não suporta reprodução de vídeo.
+                </video>
+              </div>
+              <div className="p-3.5 flex-1 flex flex-col justify-between">
+                <div>
+                  <p className="text-[11px] font-medium text-[#991B1B]">
+                    {clip.occasion}
+                  </p>
+                  <h3 className="text-sm font-semibold text-[#171412] mt-0.5 leading-snug">
+                    {clip.title}
+                  </h3>
+                </div>
+                <a
+                  href="https://www.instagram.com/despertecoracoes/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2.5 inline-flex items-center gap-1 text-xs font-medium text-[#575049] hover:text-[#171412]"
+                >
+                  @despertecoracoes
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        {instagramPosts.length > 0 && (
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
             {instagramPosts.map((post) => {
               const embedUrl = toInstagramEmbedUrl(post.instagramUrl);
               return (
@@ -1524,26 +2164,6 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               );
             })}
           </div>
-        ) : (
-          <div className="bg-white border border-[#E6E2DC] rounded-xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-2xl">
-              <p className="text-base font-semibold text-[#171412]">
-                Acompanhe nossas homenagens diárias no perfil oficial @despertecoracoes
-              </p>
-              <p className="text-sm text-[#575049] leading-relaxed">
-                Veja surpresas reais de aniversário, reconciliação, queimas de fogos (12x1, chuva de prata e vulcão) e momentos emocionantes de famílias usando nosso microfone ao vivo em Recife.
-              </p>
-            </div>
-            <a
-              href="https://www.instagram.com/despertecoracoes/reels/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-[#171412] hover:bg-[#2F2A26] rounded-lg transition-colors whitespace-nowrap shrink-0"
-            >
-              Abrir @despertecoracoes no Instagram
-              <ExternalLink className="w-4 h-4" />
-            </a>
-          </div>
         )}
       </section>
 
@@ -1586,17 +2206,59 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         </div>
       </section>
 
-      <footer className="max-w-[1280px] mx-auto px-4 sm:px-8 pt-8 border-t border-[#E6E2DC] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#575049]">
-        <p>Desperte Corações · Carro de Mensagem ao Vivo em Recife e RMR</p>
-        <div className="flex items-center gap-5">
-          <a
-            href="https://www.instagram.com/despertecoracoes/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[#171412] underline underline-offset-4"
-          >
-            Instagram @despertecoracoes
-          </a>
+      <footer className="max-w-[1280px] mx-auto px-4 sm:px-8 pt-10 pb-6 border-t border-[#E6E2DC] text-xs text-[#575049]">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-[#E6E2DC]">
+          <div>
+            <p className="font-display text-base font-semibold text-[#171412]">
+              Desperte Corações
+            </p>
+            <p className="mt-1.5 leading-relaxed">
+              Carro de Mensagem ao Vivo em Recife e Região Metropolitana. Locução personalizada, música e emoção na porta de quem você ama.
+            </p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-[#171412] mb-1.5 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-[#991B1B]" />
+              Endereço da Empresa
+            </p>
+            <p className="leading-relaxed text-[#36312C]">{COMPANY_ADDRESS}</p>
+          </div>
+
+          <div>
+            <p className="font-semibold text-[#171412] mb-1.5 flex items-center gap-1.5">
+              <Phone className="w-3.5 h-3.5 text-[#991B1B]" />
+              Contatos e Atendimento
+            </p>
+            <div className="space-y-1.5">
+              <p>
+                WhatsApp:{' '}
+                <a
+                  href={buildCompanyWhatsappUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono font-semibold text-[#16A34A] hover:underline"
+                >
+                  {COMPANY_WHATSAPP_DISPLAY}
+                </a>
+              </p>
+              <p>
+                Instagram:{' '}
+                <a
+                  href="https://www.instagram.com/despertecoracoes/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#171412] hover:underline"
+                >
+                  @despertecoracoes
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-5 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p>© {new Date().getFullYear()} Desperte Corações · Todos os direitos reservados</p>
           <button
             type="button"
             onClick={() => setPrivacyOpen(true)}
@@ -1606,6 +2268,18 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
           </button>
         </div>
       </footer>
+
+      {/* Botão flutuante compacto de Atendimento no WhatsApp */}
+      <a
+        href={buildCompanyWhatsappUrl()}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Atendimento no WhatsApp Desperte Corações"
+        className="fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-40 inline-flex items-center gap-2 p-3 sm:px-4 sm:py-3 text-sm font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-xl shadow-lg transition-colors"
+      >
+        <MessageCircle className="w-5 h-5 sm:w-4 sm:h-4 shrink-0" />
+        <span className="hidden sm:inline">Atendimento WhatsApp</span>
+      </a>
 
       {/* Modal: Entrar / Registrar para concluir reserva sem perder dados */}
       {authModalOpen && (

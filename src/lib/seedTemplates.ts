@@ -25,7 +25,7 @@ export const DEFAULT_TEMPLATES: {
     title: '03. O que vem no Pacote Completo (Brinde + 3 Fogos inclusos)',
     category: 'Pacotes e Opcionais',
     content:
-      'Maravilha, {cliente}! Para {bairro} no dia {data} às {horario}, o pacote do carro de mensagem ao vivo sai por {valor} (saímos do Ipsep — nosso mínimo é R$ 250,00 no Ipsep).\n\nO que já vai INCLUSO no valor:\n• Carro equipado com som de alta qualidade e iluminação\n• 1 Brinde à sua escolha: Champanhe OU Caixa de Chocolates\n• 3 Queimas de Fogos inclusas: 1x Fogos 12x1, Chuva de Prata e Árvore de Natal (Vulcão)\n• Locução ao vivo personalizada para {homenageado} (texto seu ou criado por nós)\n• 3 músicas da sua escolha\n• Microfone ao vivo (para até 5 pessoas falarem) OU envio de até 10 áudios de até 40 segundos cada\n• Duração média de 30 a 50 minutos no local\n\nOpcional à parte (caso queira):\n• Levar os dois brindes juntos (Champanhe + Chocolate): + R$ 65,00',
+      'Maravilha, {cliente}! Para {bairro} no dia {data} às {horario}, o pacote completo do carro de mensagem ao vivo sai por {valor}.\n\nO que já vai INCLUSO no valor:\n• Carro equipado com som de alta qualidade e iluminação\n• 1 Brinde à sua escolha: Champanhe OU Caixa de Chocolates\n• 3 Queimas de Fogos inclusas: 1x Fogos 12x1, Chuva de Prata e Árvore de Natal (Vulcão)\n• Locução ao vivo personalizada para {homenageado} (texto seu ou criado por nós)\n• 3 músicas da sua escolha\n• Microfone ao vivo (para até 5 pessoas falarem) OU envio de até 10 áudios de até 40 segundos cada\n• Duração média de 30 a 50 minutos no local\n\nOpcional à parte (caso queira):\n• Levar os dois brindes juntos (Champanhe + Chocolate): + R$ 30,00',
   },
   {
     id: 'tpl-4',
