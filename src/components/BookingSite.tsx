@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Calendar,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   ExternalLink,
   Flame,
   Gift,
@@ -13,6 +15,7 @@ import {
   MessageCircle,
   Music,
   Phone,
+  QrCode,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -28,6 +31,7 @@ import {
   InstagramPost,
   MessageSource,
   OccasionType,
+  PaymentSettings,
   PropertyType,
 } from '../types/booking';
 import {
@@ -40,6 +44,7 @@ import {
   getBlockedDateReason,
   GIFT_OPTIONS,
   OCCASIONS,
+  RESERVATION_DEPOSIT_BRL,
 } from '../constants/pricing';
 import {
   AddressPriceResult,
@@ -53,14 +58,49 @@ import {
   createBookingApi,
   fetchAvailability,
   fetchInstagramPosts,
+  fetchPaymentSettings,
   generateAiMessageApi,
   subscribeAvailability,
 } from '../lib/api';
+import { buildPixPayload, generatePixQrDataUrl } from '../lib/pix';
 import { signOutUser } from '../lib/firebase';
 import { AuthPanel } from './AuthPanel';
 import { HumanVerification } from './HumanVerification';
 import { PrivacyModal } from './PrivacyModal';
 import HERO_IMAGE from '../assets/images/hero_carro_desperte.jpg';
+
+const FAQ_ITEMS = [
+  {
+    question: 'Quanto tempo dura a homenagem ao vivo?',
+    answer:
+      'Em média de 30 a 50 minutos no local, com locução ao vivo, 3 músicas escolhidas por você, leitura da mensagem personalizada, entrega do mimo em mãos e 3 queimas de fogos (quando selecionadas).',
+  },
+  {
+    question: 'Como funciona o sinal de R$ 50,00 via Pix para confirmar?',
+    answer:
+      'Ao concluir o agendamento automático, seu horário é bloqueado imediatamente na agenda. Para confirmar a reserva em definitivo, solicitamos um sinal de R$ 50,00 via Pix (com QR Code ou chave enviada no WhatsApp) e o restante pode ser acertado no dia.',
+  },
+  {
+    question: 'Posso agendar sem fazer cadastro ou login no site?',
+    answer:
+      'Sim! Quem entra com Google ou e-mail verificado trava o horário na agenda na hora. Mas se preferir não se cadastrar, basta preencher o que desejar e clicar em "Prefere sem cadastro? Enviar no WhatsApp" no resumo.',
+  },
+  {
+    question: 'Vocês atendem prédios, condomínios fechados e locais de trabalho?',
+    answer:
+      'Sim. Atendemos casas, prédios, condomínios e estabelecimentos comerciais. Avisamos pelo WhatsApp minutos antes da chegada para você chamar o(a) homenageado(a) até a portaria, varanda ou frente do local.',
+  },
+  {
+    question: 'Os fogos de artifício são obrigatórios?',
+    answer:
+      'Não. Os 3 fogos (12x1, Chuva de Prata e Vulcão) já estão inclusos sem custo adicional, mas se o local tiver restrição ou você preferir sem fogos, é só desmarcar a opção na Etapa 3.',
+  },
+  {
+    question: 'E se chover ou precisar alterar o horário?',
+    answer:
+      'Nossa equipe acompanha a previsão com você pelo WhatsApp. Se houver chuva forte que impeça a homenagem com segurança, alinhamos juntos o melhor horário ou nova data.',
+  },
+];
 
 const HIGHLIGHT_VIDEO_CUTS = [
   {
@@ -295,6 +335,14 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const [submitError, setSubmitError] = useState('');
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
 
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(
+    null
+  );
+  const [pixPayload, setPixPayload] = useState('');
+  const [pixQrUrl, setPixQrUrl] = useState('');
+  const [copiedPix, setCopiedPix] = useState(false);
+  const [openFaqIdx, setOpenFaqIdx] = useState<number | null>(0);
+
   useEffect(() => {
     try {
       const draft: BookingDraft = {
@@ -427,6 +475,48 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       });
   }, [refreshSignal]);
 
+  useEffect(() => {
+    if (!user || !user.emailVerified) {
+      setPaymentSettings(null);
+      return;
+    }
+    fetchPaymentSettings()
+      .then(setPaymentSettings)
+      .catch(() => setPaymentSettings(null));
+  }, [user, refreshSignal]);
+
+  useEffect(() => {
+    const cleanKey = paymentSettings?.pixKey?.trim() || '';
+    if (!confirmedBooking || !cleanKey) {
+      setPixPayload('');
+      setPixQrUrl('');
+      return;
+    }
+    let cancelled = false;
+    const deposit =
+      paymentSettings?.depositAmount && paymentSettings.depositAmount > 0
+        ? paymentSettings.depositAmount
+        : RESERVATION_DEPOSIT_BRL;
+    const payload = buildPixPayload({
+      pixKey: cleanKey,
+      merchantName: paymentSettings?.merchantName || 'Desperte Coracoes',
+      merchantCity: paymentSettings?.merchantCity || 'RECIFE',
+      amount: deposit,
+      txid: confirmedBooking.protocol,
+    });
+    setPixPayload(payload);
+    generatePixQrDataUrl(payload)
+      .then((url) => {
+        if (!cancelled) setPixQrUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPixQrUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [confirmedBooking, paymentSettings]);
+
   const runAddressCalculation = useCallback(
     async (nextStreet: string, nextNeighborhood: string, nextCity: string) => {
       const hasAddress =
@@ -512,6 +602,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       ),
     [addressPrice, neighborhood, giftOption, includeFireworks]
   );
+
+  const depositAmount =
+    paymentSettings?.depositAmount && paymentSettings.depositAmount > 0
+      ? paymentSettings.depositAmount
+      : RESERVATION_DEPOSIT_BRL;
 
   const handleGenerateAiScript = async () => {
     if (!honoreeName.trim()) {
@@ -782,6 +877,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const buildWhatsappSummaryUrl = (booking: Booking) => {
     const giftLabel =
       GIFT_OPTIONS.find((g) => g.value === booking.giftOption)?.label ?? 'Nenhum';
+    const remaining = Math.max(0, booking.totalPrice - depositAmount);
     const text = [
       `Olá! Acabei de fazer meu agendamento automático na Desperte Corações.`,
       `Protocolo: ${booking.protocol}`,
@@ -794,6 +890,10 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       `Músicas: 1) ${booking.songs[0]} | 2) ${booking.songs[1]} | 3) ${booking.songs[2]}`,
       `Mensagem: ${booking.messageSource === 'empresa' ? 'Gerada pela empresa' : 'Texto enviado pelo cliente'}`,
       `Total previsto: ${formatBRL(booking.totalPrice)}`,
+      `Sinal via Pix: ${formatBRL(depositAmount)} (Restante no dia: ${formatBRL(remaining)})`,
+      paymentSettings?.pixKey
+        ? `Vou enviar o comprovante do sinal de ${formatBRL(depositAmount)} por aqui.`
+        : `Pode me enviar a chave Pix para o sinal de ${formatBRL(depositAmount)}?`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -812,6 +912,42 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       `Ocasião: ${occasion}${honoreeName.trim() ? ` (Para ${honoreeName.trim()})` : ''}`,
       `Brinde: ${giftLabel}${includeFireworks ? ' + 3 Queimas de Fogos' : ''}`,
       clientName.trim() ? `Meu nome: ${clientName.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return buildCompanyWhatsappUrl(text);
+  };
+
+  const buildDirectWhatsappOrderUrl = () => {
+    const giftLabel =
+      GIFT_OPTIONS.find((g) => g.value === giftOption)?.label ?? 'Champanhe';
+    const priceLabel = addressPrice?.requiresWhatsappQuote
+      ? 'Combinar no WhatsApp'
+      : addressPrice
+        ? formatBRL(pricing.totalPrice)
+        : 'A calcular pelo endereço';
+    const text = [
+      `Olá! Quero solicitar um agendamento de carro de mensagem (sem cadastro no site):`,
+      `Data e Horário desejados: ${formatDatePtBr(selectedDate)}${selectedTime ? ` às ${selectedTime}` : ' (a combinar)'}`,
+      `Ocasião: ${occasion}`,
+      honoreeName.trim()
+        ? `Homenageado(a): ${honoreeName.trim()}${honoreeAge.trim() ? ` (${honoreeAge.trim()} anos)` : ''}`
+        : '',
+      clientName.trim() ? `Meu nome: ${clientName.trim()}` : '',
+      clientWhatsapp.trim() ? `Meu WhatsApp: ${clientWhatsapp.trim()}` : '',
+      streetAddress.trim() || neighborhood.trim()
+        ? `Endereço: ${streetAddress.trim() || 'A informar'} - ${neighborhood.trim() || 'A informar'} — ${city.trim() || 'Recife'} (${propertyType})`
+        : '',
+      referencePoint.trim() ? `Referência: ${referencePoint.trim()}` : '',
+      `Mimos: ${giftLabel}${includeFireworks ? ' + 3 Fogos inclusos' : ' (sem fogos)'}`,
+      song1.trim() || song2.trim() || song3.trim()
+        ? `Músicas: 1) ${song1.trim() || '-'} | 2) ${song2.trim() || '-'} | 3) ${song3.trim() || '-'}`
+        : '',
+      `Participação: ${participationMode}`,
+      messageSource === 'cliente' && customMessage.trim()
+        ? `Mensagem: ${customMessage.trim()}`
+        : 'Mensagem: Gerada pela equipe Desperte Corações',
+      `Valor previsto: ${priceLabel} (Sinal de ${formatBRL(depositAmount)} via Pix para confirmar)`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -1067,7 +1203,84 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 <p className="font-mono text-lg font-semibold text-[#991B1B] mt-0.5 tabular-nums">
                   {formatBRL(confirmedBooking.totalPrice)}
                 </p>
+                <p className="text-xs text-[#575049] mt-0.5">
+                  Sinal de {formatBRL(depositAmount)} via Pix · Restante de{' '}
+                  {formatBRL(Math.max(0, confirmedBooking.totalPrice - depositAmount))} no dia
+                </p>
               </div>
+            </div>
+
+            {/* Painel de Sinal R$ 50 via Pix */}
+            <div className="mb-6 bg-[#FAF9F7] border border-[#E6E2DC] rounded-xl p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2 text-[#171412] font-semibold text-sm">
+                  <QrCode className="w-4 h-4 text-[#991B1B]" />
+                  <span>
+                    Sinal da Reserva via Pix ({formatBRL(depositAmount)})
+                  </span>
+                </div>
+                <span className="text-xs font-mono text-[#991B1B] font-semibold">
+                  Protocolo {confirmedBooking.protocol}
+                </span>
+              </div>
+
+              {pixPayload && pixQrUrl ? (
+                <div className="flex flex-col sm:flex-row items-center gap-5">
+                  <img
+                    src={pixQrUrl}
+                    alt="QR Code Pix para pagamento do sinal de reserva"
+                    className="w-36 h-36 rounded-lg border border-[#E6E2DC] bg-white p-2 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 w-full space-y-2.5">
+                    <p className="text-xs sm:text-sm text-[#36312C] leading-relaxed">
+                      {paymentSettings?.instructions ||
+                        `Pague o sinal de ${formatBRL(depositAmount)} pelo QR Code ou Copia e Cola e envie o comprovante no WhatsApp para confirmar sua reserva.`}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={pixPayload}
+                        aria-label="Código Pix Copia e Cola"
+                        className="flex-1 min-w-0 px-3 py-2 text-xs font-mono bg-white border border-[#E6E2DC] rounded-lg text-[#575049]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(pixPayload);
+                          setCopiedPix(true);
+                          setTimeout(() => setCopiedPix(false), 2500);
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-[#171412] bg-white hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors shrink-0"
+                      >
+                        {copiedPix ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-[#16A34A]" />
+                            Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            Copiar Código Pix
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs sm:text-sm text-[#36312C] leading-relaxed">
+                  Para confirmar este horário em definitivo, solicitamos um sinal de{' '}
+                  <span className="font-semibold text-[#171412]">
+                    {formatBRL(depositAmount)} via Pix
+                  </span>
+                  . Clique em{' '}
+                  <span className="font-semibold text-[#16A34A]">
+                    Solicitar Chave Pix e Enviar no WhatsApp
+                  </span>{' '}
+                  abaixo para receber nossa chave e enviar o comprovante.
+                </p>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -1078,7 +1291,9 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors"
               >
                 <Send className="w-4 h-4" />
-                Enviar Comprovante no WhatsApp
+                {pixPayload
+                  ? 'Enviar Comprovante no WhatsApp'
+                  : 'Solicitar Chave Pix e Enviar no WhatsApp'}
               </a>
               <button
                 type="button"
@@ -2026,6 +2241,12 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                         : 'Informe o endereço'}
                   </span>
                 </div>
+                <div className="flex justify-between items-center text-xs text-[#575049]">
+                  <span>Sinal para confirmar (Pix)</span>
+                  <span className="font-mono font-semibold text-[#171412] tabular-nums">
+                    {formatBRL(depositAmount)}
+                  </span>
+                </div>
               </div>
 
               <div className="mt-4 space-y-3">
@@ -2073,17 +2294,28 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   Solicitar Orçamento no WhatsApp
                 </a>
               ) : (
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="mt-5 w-full py-3.5 px-5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
-                >
-                  {submitting
-                    ? 'Confirmando Reserva...'
-                    : user && user.emailVerified
-                      ? 'Confirmar Agendamento Automático'
-                      : 'Entrar / Registrar e Confirmar'}
-                </button>
+                <>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="mt-5 w-full py-3.5 px-5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
+                  >
+                    {submitting
+                      ? 'Confirmando Reserva...'
+                      : user && user.emailVerified
+                        ? 'Confirmar Agendamento Automático'
+                        : 'Entrar / Registrar e Confirmar'}
+                  </button>
+                  <a
+                    href={buildDirectWhatsappOrderUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-2.5 w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-semibold text-[#171412] bg-[#FAF9F7] hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4 text-[#16A34A]" />
+                    Prefere sem cadastro? Enviar no WhatsApp
+                  </a>
+                </>
               )}
 
               {user && user.emailVerified ? (
@@ -2301,6 +2533,52 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               Realizamos a locução ao vivo intercalada com as 3 músicas, acionamos os fogos (se escolhidos) e entregamos o champanhe ou chocolate em mãos.
             </p>
           </div>
+        </div>
+      </section>
+
+      {/* Dúvidas Frequentes */}
+      <section
+        id="duvidas"
+        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-12 border-t border-[#E6E2DC]"
+      >
+        <div className="mb-6">
+          <p className="text-xs font-medium text-[#991B1B] mb-1">
+            Tire suas dúvidas
+          </p>
+          <h2 className="font-display text-2xl font-semibold text-[#171412]">
+            Perguntas Frequentes
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {FAQ_ITEMS.map((item, idx) => {
+            const isOpen = openFaqIdx === idx;
+            return (
+              <div
+                key={item.question}
+                className="bg-white border border-[#E6E2DC] rounded-xl overflow-hidden"
+              >
+                <button
+                  type="button"
+                  onClick={() => setOpenFaqIdx(isOpen ? null : idx)}
+                  aria-expanded={isOpen}
+                  className="w-full px-5 py-4 flex items-center justify-between gap-3 text-left text-sm font-semibold text-[#171412] hover:bg-[#FAF9F7] transition-colors"
+                >
+                  <span>{item.question}</span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-[#575049] shrink-0 transition-transform ${
+                      isOpen ? 'rotate-180 text-[#991B1B]' : ''
+                    }`}
+                  />
+                </button>
+                {isOpen && (
+                  <p className="px-5 pb-4 text-sm text-[#575049] leading-relaxed border-t border-[#F3F1ED] pt-3">
+                    {item.answer}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
 

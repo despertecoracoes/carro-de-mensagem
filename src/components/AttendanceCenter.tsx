@@ -9,6 +9,7 @@ import {
   Lock,
   MessageSquare,
   Plus,
+  QrCode,
   RefreshCw,
   Search,
   Sparkles,
@@ -35,6 +36,7 @@ import {
   GIFT_OPTIONS,
   NEIGHBORHOOD_ZONES,
   OCCASIONS,
+  RESERVATION_DEPOSIT_BRL,
   STANDARD_TIME_SLOTS,
   TEMPLATE_CATEGORIES,
 } from '../constants/pricing';
@@ -49,15 +51,23 @@ import {
   fetchAvailability,
   fetchBookings,
   fetchInstagramPosts,
+  fetchPaymentSettings,
   fetchTemplates,
   generateAiMessageApi,
+  savePaymentSettings,
   toggleSlotBlock,
   updateBookingApi,
   updateTemplateApi,
 } from '../lib/api';
+import { buildPixPayload, generatePixQrDataUrl } from '../lib/pix';
 import { isAdminUser, signOutUser } from '../lib/firebase';
 
-type WorkspaceTab = 'templates' | 'bookings' | 'schedule' | 'instagram';
+type WorkspaceTab =
+  | 'templates'
+  | 'bookings'
+  | 'schedule'
+  | 'instagram'
+  | 'settings';
 
 function getTodayStr(): string {
   const d = new Date();
@@ -182,18 +192,47 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
   const [igError, setIgError] = useState('');
   const [savingIg, setSavingIg] = useState(false);
 
+  // Payment / Pix do Sinal State
+  const [pixKey, setPixKey] = useState('');
+  const [merchantName, setMerchantName] = useState('Desperte Coracoes');
+  const [merchantCity, setMerchantCity] = useState('RECIFE');
+  const [depositAmount, setDepositAmount] = useState<string>(
+    String(RESERVATION_DEPOSIT_BRL)
+  );
+  const [pixInstructions, setPixInstructions] = useState(
+    'Envie o comprovante do sinal de R$ 50,00 no WhatsApp para confirmarmos o horário na agenda.'
+  );
+  const [savingPix, setSavingPix] = useState(false);
+  const [pixSaveMessage, setPixSaveMessage] = useState('');
+  const [pixError, setPixError] = useState('');
+  const [pixPreviewQr, setPixPreviewQr] = useState('');
+  const [pixPreviewPayload, setPixPreviewPayload] = useState('');
+  const [copiedPixPreview, setCopiedPixPreview] = useState(false);
+
   const loadWorkspaceData = useCallback(async () => {
     setLoadingData(true);
     setDataError('');
     try {
-      const [tpls, bkgs, igs] = await Promise.all([
+      const [tpls, bkgs, igs, paySettings] = await Promise.all([
         fetchTemplates(),
         fetchBookings(),
         fetchInstagramPosts(),
+        fetchPaymentSettings().catch(() => null),
       ]);
       setTemplates(tpls);
       setBookings(bkgs);
       setInstagramPosts(igs);
+      if (paySettings) {
+        setPixKey(paySettings.pixKey);
+        setMerchantName(paySettings.merchantName || 'Desperte Coracoes');
+        setMerchantCity(paySettings.merchantCity || 'RECIFE');
+        setDepositAmount(
+          String(paySettings.depositAmount ?? RESERVATION_DEPOSIT_BRL)
+        );
+        if (paySettings.instructions) {
+          setPixInstructions(paySettings.instructions);
+        }
+      }
       setSelectedBookingId((prev) => {
         if (prev && bkgs.some((b) => b.id === prev)) return prev;
         return bkgs[0]?.id ?? null;
@@ -231,6 +270,39 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
     if (!authReady) return;
     loadScheduleDate(scheduleDate);
   }, [authReady, scheduleDate, loadScheduleDate, refreshSignal]);
+
+  useEffect(() => {
+    const cleanKey = pixKey.trim();
+    if (!cleanKey) {
+      setPixPreviewPayload('');
+      setPixPreviewQr('');
+      return;
+    }
+    let cancelled = false;
+    const parsedAmount = Number(depositAmount.replace(',', '.'));
+    const validAmount =
+      Number.isFinite(parsedAmount) && parsedAmount >= 0
+        ? parsedAmount
+        : RESERVATION_DEPOSIT_BRL;
+    const payload = buildPixPayload({
+      pixKey: cleanKey,
+      merchantName,
+      merchantCity,
+      amount: validAmount,
+      txid: 'DESPERTE50',
+    });
+    setPixPreviewPayload(payload);
+    generatePixQrDataUrl(payload)
+      .then((url) => {
+        if (!cancelled) setPixPreviewQr(url);
+      })
+      .catch(() => {
+        if (!cancelled) setPixPreviewQr('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pixKey, merchantName, merchantCity, depositAmount]);
 
   const interpolateTemplate = useCallback(
     (raw: string) => {
@@ -478,6 +550,42 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
     }
   };
 
+  const handleSavePaymentSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingPix(true);
+    setPixError('');
+    setPixSaveMessage('');
+    try {
+      const parsedAmount = Number(depositAmount.replace(',', '.'));
+      const saved = await savePaymentSettings({
+        pixKey: pixKey.trim(),
+        merchantName: merchantName.trim() || 'Desperte Coracoes',
+        merchantCity: merchantCity.trim() || 'RECIFE',
+        depositAmount:
+          Number.isFinite(parsedAmount) && parsedAmount >= 0
+            ? parsedAmount
+            : RESERVATION_DEPOSIT_BRL,
+        instructions: pixInstructions.trim(),
+      });
+      setPixKey(saved.pixKey);
+      setMerchantName(saved.merchantName);
+      setMerchantCity(saved.merchantCity);
+      setDepositAmount(String(saved.depositAmount));
+      setPixInstructions(saved.instructions);
+      setPixSaveMessage(
+        saved.pixKey
+          ? 'Chave Pix da Ton salva! O QR Code do sinal já aparece automaticamente após o cliente confirmar a reserva.'
+          : 'Configurações do sinal salvas! Assim que estiver com a chave Pix da Ton em mãos, cole aqui e clique em Salvar.'
+      );
+    } catch (err) {
+      setPixError(
+        err instanceof Error ? err.message : 'Erro ao salvar configurações do Pix.'
+      );
+    } finally {
+      setSavingPix(false);
+    }
+  };
+
   const handleAddInstagramPost = async (e: React.FormEvent) => {
     e.preventDefault();
     setIgError('');
@@ -606,6 +714,24 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
               </span>
               <span className="font-mono text-xs opacity-80 tabular-nums">
                 {instagramPosts.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap shrink-0 ${
+                activeTab === 'settings'
+                  ? 'bg-[#991B1B] text-white'
+                  : 'text-[#575049] hover:text-[#171412] hover:bg-[#FAF9F7]'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <QrCode className="w-4 h-4" />
+                Pix do Sinal (R$ 50)
+              </span>
+              <span className="font-mono text-[11px] opacity-85">
+                {pixKey.trim() ? 'Ativo' : 'Pendente'}
               </span>
             </button>
           </nav>
@@ -1527,6 +1653,186 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="font-display text-2xl font-semibold text-[#171412]">
+                  Pix do Sinal de Reserva (Conta Ton)
+                </h2>
+                <p className="text-sm text-[#575049] mt-0.5">
+                  Configure sua chave Pix da Ton aqui no painel seguro (Firebase). Ela nunca fica exposta no código público do GitHub.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <form
+                  onSubmit={handleSavePaymentSettings}
+                  className="lg:col-span-7 bg-white border border-[#E6E2DC] rounded-xl p-6 space-y-4"
+                >
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Chave Pix da Conta Ton (CNPJ, CPF, E-mail, Telefone ou Chave Aleatória)
+                    </label>
+                    <input
+                      type="text"
+                      value={pixKey}
+                      onChange={(e) => {
+                        setPixKey(e.target.value);
+                        setPixSaveMessage('');
+                      }}
+                      placeholder="Cole sua chave Pix da Ton quando tiver em mãos"
+                      className="w-full px-3 py-2.5 text-sm border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                    />
+                    <p className="text-xs text-[#575049] mt-1">
+                      Dica: se for telefone, use o formato internacional <span className="font-mono">+5581999999999</span>. Se deixar em branco, o site orienta o cliente a pedir a chave pelo WhatsApp.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-[#575049] mb-1">
+                        Nome do Titular / Empresa
+                      </label>
+                      <input
+                        type="text"
+                        value={merchantName}
+                        onChange={(e) => setMerchantName(e.target.value)}
+                        placeholder="Desperte Coracoes"
+                        maxLength={60}
+                        className="w-full px-3 py-2.5 text-sm border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-[#575049] mb-1">
+                        Cidade
+                      </label>
+                      <input
+                        type="text"
+                        value={merchantCity}
+                        onChange={(e) => setMerchantCity(e.target.value)}
+                        placeholder="RECIFE"
+                        maxLength={40}
+                        className="w-full px-3 py-2.5 text-sm border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Valor do Sinal da Reserva (R$)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={5000}
+                      step="1"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      className="w-full sm:w-48 px-3 py-2.5 text-sm font-mono border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-[#575049] mb-1">
+                      Instruções exibidas ao cliente após agendar
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={pixInstructions}
+                      onChange={(e) => setPixInstructions(e.target.value)}
+                      maxLength={400}
+                      className="w-full px-3 py-2.5 text-sm border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
+                    />
+                  </div>
+
+                  {pixError && (
+                    <p className="text-xs text-[#DC2626]">{pixError}</p>
+                  )}
+                  {pixSaveMessage && (
+                    <p className="text-xs text-[#16A34A] font-medium">
+                      {pixSaveMessage}
+                    </p>
+                  )}
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={savingPix}
+                      className="px-5 py-2.5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
+                    >
+                      {savingPix ? 'Salvando...' : 'Salvar Configurações do Pix'}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="lg:col-span-5 bg-white border border-[#E6E2DC] rounded-xl p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-[#171412]">
+                      Pré-visualização do QR Code (R$ {depositAmount || '50'})
+                    </h3>
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded ${
+                        pixKey.trim()
+                          ? 'bg-[#16A34A]/10 text-[#16A34A]'
+                          : 'bg-[#D97706]/10 text-[#D97706]'
+                      }`}
+                    >
+                      {pixKey.trim() ? 'Pronto para cobrar' : 'Aguardando chave'}
+                    </span>
+                  </div>
+
+                  {pixKey.trim() && pixPreviewQr ? (
+                    <div className="space-y-3 text-center">
+                      <div className="inline-block p-3 bg-white border border-[#E6E2DC] rounded-xl">
+                        <img
+                          src={pixPreviewQr}
+                          alt="Prévia do QR Code Pix do Sinal"
+                          className="w-44 h-44 mx-auto"
+                        />
+                      </div>
+                      <p className="text-xs text-[#575049]">
+                        Testado no padrão oficial BR Code do Banco Central (funciona no app da Ton e em qualquer banco).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!pixPreviewPayload) return;
+                          navigator.clipboard.writeText(pixPreviewPayload);
+                          setCopiedPixPreview(true);
+                          setTimeout(() => setCopiedPixPreview(false), 2000);
+                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold text-[#171412] bg-[#FAF9F7] hover:bg-[#F3EFE8] border border-[#E6E2DC] rounded-lg transition-colors"
+                      >
+                        {copiedPixPreview ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-[#16A34A]" />
+                            Código Pix Copiado!
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            Copiar Pix Copia e Cola de Teste
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-[#FAF9F7] border border-dashed border-[#E6E2DC] rounded-xl p-6 text-center space-y-2">
+                      <QrCode className="w-10 h-10 text-[#991B1B]/50 mx-auto" />
+                      <p className="text-sm font-medium text-[#171412]">
+                        Nenhuma chave Pix cadastrada ainda
+                      </p>
+                      <p className="text-xs text-[#575049] leading-relaxed">
+                        Enquanto você não colar a chave Pix da Ton aqui, o site já informa o sinal de{' '}
+                        <span className="font-semibold text-[#171412]">R$ 50,00</span> e direciona o cliente para pedir a chave pelo WhatsApp.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </section>

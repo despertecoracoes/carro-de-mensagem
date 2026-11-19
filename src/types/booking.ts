@@ -106,3 +106,12 @@ export interface QuickTemplate {
   content: string;
   updatedAt: string;
 }
+
+export interface PaymentSettings {
+  pixKey: string;
+  merchantName: string;
+  merchantCity: string;
+  depositAmount: number;
+  instructions: string;
+  updatedAt: string;
+}

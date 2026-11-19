@@ -364,6 +364,45 @@
         }
       },
       "required": ["email", "createdAt"]
+    },
+    "PaymentSettings": {
+      "title": "PaymentSettings",
+      "description": "Pix deposit configuration (e.g. Ton Pix key, merchant name, city, and R$ 50 reservation deposit).",
+      "type": "object",
+      "properties": {
+        "pixKey": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Pix key configured by the business admin."
+        },
+        "merchantName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Merchant name shown in Pix receipt."
+        },
+        "merchantCity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Merchant city shown in Pix payload."
+        },
+        "depositAmount": {
+          "type": "number",
+          "description": "Reservation deposit amount in BRL (default 50)."
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Customer instructions for sending the Pix deposit receipt."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["pixKey", "merchantName", "merchantCity", "depositAmount", "instructions", "updatedAt"]
     }
   },
   "firestore": {
@@ -390,6 +429,10 @@
     "/admins/{adminUid}": {
       "schema": { "$ref": "#/entities/AdminUser" },
       "description": "Admin role lookup collection."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PaymentSettings" },
+      "description": "Pix reservation deposit configuration readable by verified users and writable only by admin."
     }
   }
 }

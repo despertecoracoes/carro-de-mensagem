@@ -73,6 +73,7 @@ export interface NeighborhoodZone {
 }
 
 export const MINIMUM_BASE_PRICE = 250;
+export const RESERVATION_DEPOSIT_BRL = 50;
 
 export const NEIGHBORHOOD_ZONES: NeighborhoodZone[] = [
   {

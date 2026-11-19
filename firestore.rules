@@ -143,6 +143,17 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidPaymentSettings(data) {
+      return data.keys().hasAll(['pixKey', 'merchantName', 'merchantCity', 'depositAmount', 'instructions', 'updatedAt'])
+        && data.keys().hasOnly(['pixKey', 'merchantName', 'merchantCity', 'depositAmount', 'instructions', 'updatedAt'])
+        && data.pixKey is string && data.pixKey.size() <= 160
+        && data.merchantName is string && data.merchantName.size() >= 1 && data.merchantName.size() <= 60
+        && data.merchantCity is string && data.merchantCity.size() >= 1 && data.merchantCity.size() <= 40
+        && data.depositAmount is number && data.depositAmount >= 0 && data.depositAmount <= 5000
+        && data.instructions is string && data.instructions.size() <= 400
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     // 1. Public availability slots (Zero PII)
@@ -280,6 +291,19 @@ service cloud.firestore {
         && isValidAdminUser(incoming())
         && incoming().createdAt == request.time;
       allow delete: if isAdminEmail() && isValidId(adminUid);
+    }
+
+    // 7. Payment settings (Pix key & R$ 50 deposit — verified users get, admin write)
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && isVerifiedUser();
+      allow list: if isAdmin();
+
+      allow create, update: if isAdmin()
+        && isValidId(settingId)
+        && isValidPaymentSettings(incoming())
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isAdmin() && isValidId(settingId);
     }
   }
 }

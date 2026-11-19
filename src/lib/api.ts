@@ -18,6 +18,7 @@ import {
   Booking,
   BookingStatus,
   InstagramPost,
+  PaymentSettings,
   QuickTemplate,
   TemplateCategory,
   TimeSlotAvailability,
@@ -26,6 +27,7 @@ import {
 import {
   calculatePrices,
   getBlockedDateReason,
+  RESERVATION_DEPOSIT_BRL,
   STANDARD_TIME_SLOTS,
 } from '../constants/pricing';
 import {
@@ -705,4 +707,72 @@ export async function generateAiMessageApi(payload: {
 }): Promise<{ script: string }> {
   const script = generateLocalTributeMessage(payload);
   return { script };
+}
+
+export async function fetchPaymentSettings(): Promise<PaymentSettings | null> {
+  const user = auth.currentUser;
+  if (!user || !user.emailVerified) {
+    return null;
+  }
+  const path = 'settings/payment';
+  try {
+    const snap = await getDoc(doc(db, 'settings', 'payment'));
+    if (!snap.exists()) {
+      return {
+        pixKey: '',
+        merchantName: 'Desperte Coracoes',
+        merchantCity: 'RECIFE',
+        depositAmount: RESERVATION_DEPOSIT_BRL,
+        instructions:
+          'Envie o comprovante do sinal de R$ 50,00 no WhatsApp para confirmarmos o horário na agenda.',
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    const d = snap.data();
+    return {
+      pixKey: String(d.pixKey ?? ''),
+      merchantName: String(d.merchantName ?? 'Desperte Coracoes'),
+      merchantCity: String(d.merchantCity ?? 'RECIFE'),
+      depositAmount: Number(d.depositAmount ?? RESERVATION_DEPOSIT_BRL),
+      instructions: String(d.instructions ?? ''),
+      updatedAt: formatTimestamp(d.updatedAt),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export async function savePaymentSettings(payload: {
+  pixKey: string;
+  merchantName: string;
+  merchantCity: string;
+  depositAmount: number;
+  instructions: string;
+}): Promise<PaymentSettings> {
+  const user = auth.currentUser;
+  if (!user || !isAdminUser(user)) {
+    throw new Error('Acesso restrito.');
+  }
+  const path = 'settings/payment';
+  try {
+    const cleanData = {
+      pixKey: payload.pixKey.trim().slice(0, 160),
+      merchantName:
+        payload.merchantName.trim().slice(0, 60) || 'Desperte Coracoes',
+      merchantCity: payload.merchantCity.trim().slice(0, 40) || 'RECIFE',
+      depositAmount: Math.max(
+        0,
+        Math.min(5000, Number(payload.depositAmount) || RESERVATION_DEPOSIT_BRL)
+      ),
+      instructions: payload.instructions.trim().slice(0, 400),
+      updatedAt: serverTimestamp(),
+    };
+    await setDoc(doc(db, 'settings', 'payment'), cleanData);
+    return {
+      ...cleanData,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
 }
