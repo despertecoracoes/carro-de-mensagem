@@ -25,6 +25,7 @@ import {
 } from '../types/booking';
 import {
   calculatePrices,
+  getBlockedDateReason,
   STANDARD_TIME_SLOTS,
 } from '../constants/pricing';
 import {
@@ -93,6 +94,20 @@ function buildAvailabilityFromDocs(
   date: string,
   slotDocs: Array<{ time: string; status: 'booked' | 'blocked' }>
 ): AvailabilityResponse {
+  const blockedReason = getBlockedDateReason(date);
+  if (blockedReason) {
+    const slots: TimeSlotAvailability[] = STANDARD_TIME_SLOTS.map((time) => ({
+      time,
+      state: 'blocked',
+    }));
+    return {
+      date,
+      slots,
+      standardSlots: STANDARD_TIME_SLOTS,
+      blockedReason,
+    };
+  }
+
   const map = new Map<string, 'booked' | 'blocked'>();
   for (const item of slotDocs) {
     map.set(item.time, item.status);
@@ -108,6 +123,7 @@ function buildAvailabilityFromDocs(
     date,
     slots,
     standardSlots: STANDARD_TIME_SLOTS,
+    blockedReason: null,
   };
 }
 
@@ -161,6 +177,11 @@ export async function toggleSlotBlock(
   const user = auth.currentUser;
   if (!user || !isAdminUser(user)) {
     throw new Error('Acesso restrito.');
+  }
+
+  const blockedReason = getBlockedDateReason(date);
+  if (blockedReason) {
+    throw new Error(`Data bloqueada automaticamente: ${blockedReason}`);
   }
 
   const slotId = makeSlotId(date, time);
@@ -249,6 +270,11 @@ export async function createBookingApi(payload: {
   }
   if (!user.emailVerified) {
     throw new Error('Confirme seu e-mail pelo link enviado antes de concluir a reserva.');
+  }
+
+  const blockedReason = getBlockedDateReason(payload.date);
+  if (blockedReason) {
+    throw new Error(`Data indisponível: ${blockedReason}`);
   }
 
   const slotId = makeSlotId(payload.date, payload.time);

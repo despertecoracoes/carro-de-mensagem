@@ -88,6 +88,7 @@ export interface AvailabilityResponse {
   date: string;
   slots: TimeSlotAvailability[];
   standardSlots: string[];
+  blockedReason?: string | null;
 }
 
 export type TemplateCategory =

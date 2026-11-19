@@ -153,6 +153,7 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(slotId)
         && isValidSlot(incoming())
+        && !incoming().date.matches('^\\d{4}-12-(25|31)$')
         && incoming().createdByUid == request.auth.uid
         && incoming().updatedAt == request.time
         && (
@@ -178,6 +179,7 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(bookingId)
         && isValidBooking(incoming())
+        && !incoming().date.matches('^\\d{4}-12-(25|31)$')
         && incoming().ownerUid == request.auth.uid
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time

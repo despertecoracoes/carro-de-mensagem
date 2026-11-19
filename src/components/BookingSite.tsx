@@ -37,6 +37,7 @@ import {
   COMPANY_WHATSAPP_DISPLAY,
   FIREWORKS_PRICE,
   formatBRL,
+  getBlockedDateReason,
   GIFT_OPTIONS,
   OCCASIONS,
 } from '../constants/pricing';
@@ -158,6 +159,14 @@ function getDateString(offsetDays = 0): string {
   return `${year}-${month}-${day}`;
 }
 
+function getFirstOpenDateString(): string {
+  for (let i = 0; i < 7; i += 1) {
+    const candidate = getDateString(i);
+    if (!getBlockedDateReason(candidate)) return candidate;
+  }
+  return getDateString(0);
+}
+
 function formatDatePtBr(dateStr: string): string {
   const [y, m, d] = dateStr.split('-');
   if (!y || !m || !d) return dateStr;
@@ -201,7 +210,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const [stepError, setStepError] = useState('');
 
   const [selectedDate, setSelectedDate] = useState<string>(
-    () => initialDraft.selectedDate || getDateString(0)
+    () => initialDraft.selectedDate || getFirstOpenDateString()
   );
   const [selectedTime, setSelectedTime] = useState<string>(
     () => initialDraft.selectedTime || ''
@@ -346,13 +355,22 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   ]);
 
   const quickDates = useMemo(
-    () => [
-      { label: 'Hoje', date: getDateString(0) },
-      { label: 'Amanhã', date: getDateString(1) },
-      { label: 'Em 2 dias', date: getDateString(2) },
-      { label: 'Próxima semana', date: getDateString(7) },
-    ],
+    () =>
+      [
+        { label: 'Hoje', date: getDateString(0) },
+        { label: 'Amanhã', date: getDateString(1) },
+        { label: 'Em 2 dias', date: getDateString(2) },
+        { label: 'Próxima semana', date: getDateString(7) },
+      ].map((item) => ({
+        ...item,
+        blockedReason: getBlockedDateReason(item.date),
+      })),
     []
+  );
+
+  const selectedDateBlockedReason = useMemo(
+    () => availability?.blockedReason ?? getBlockedDateReason(selectedDate),
+    [availability?.blockedReason, selectedDate]
   );
 
   const loadSlots = useCallback(async (dateToLoad: string) => {
@@ -557,8 +575,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   );
 
   const validateSingleStep = (stepIdx: number): string | null => {
-    if (stepIdx === 0 && !selectedTime) {
-      return 'Escolha um horário disponível antes de avançar.';
+    if (stepIdx === 0) {
+      if (selectedDateBlockedReason) {
+        return `Data indisponível: ${selectedDateBlockedReason} Escolha outra data.`;
+      }
+      if (!selectedTime) {
+        return 'Escolha um horário disponível antes de avançar.';
+      }
     }
     if (
       stepIdx === 1 &&
@@ -609,6 +632,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     setSubmitError('');
     setStepError('');
 
+    if (selectedDateBlockedReason) {
+      setCurrentStep(0);
+      setSubmitError(`Data indisponível: ${selectedDateBlockedReason} Escolha outra data.`);
+      return;
+    }
     if (!selectedTime) {
       setCurrentStep(0);
       setSubmitError('Escolha um horário disponível na etapa 01.');
@@ -772,6 +800,24 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     return buildCompanyWhatsappUrl(text);
   };
 
+  const buildOutOfRegionWhatsappUrl = () => {
+    const giftLabel =
+      GIFT_OPTIONS.find((g) => g.value === giftOption)?.label ?? 'Champanhe';
+    const text = [
+      `Olá! Gostaria de solicitar um orçamento para carro de mensagem ao vivo em uma região mais distante:`,
+      `Cidade / Bairro: ${city.trim() || 'A informar'} — ${neighborhood.trim() || 'A informar'}`,
+      streetAddress.trim() ? `Rua / Número: ${streetAddress.trim()}` : '',
+      referencePoint.trim() ? `Referência: ${referencePoint.trim()}` : '',
+      `Data desejada: ${formatDatePtBr(selectedDate)}${selectedTime ? ` às ${selectedTime}` : ''}`,
+      `Ocasião: ${occasion}${honoreeName.trim() ? ` (Para ${honoreeName.trim()})` : ''}`,
+      `Brinde: ${giftLabel}${includeFireworks ? ' + 3 Queimas de Fogos' : ''}`,
+      clientName.trim() ? `Meu nome: ${clientName.trim()}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return buildCompanyWhatsappUrl(text);
+  };
+
   return (
     <main className="pb-20">
       {/* Hero Split */}
@@ -780,7 +826,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
           <div className="lg:col-span-6 flex flex-col justify-between py-1 sm:py-2">
             <div>
               <p className="text-xs sm:text-sm font-medium text-[#991B1B] mb-2 sm:mb-3">
-                Carro de Mensagem ao Vivo · Recife e Região
+                Carro de Mensagem ao Vivo · Recife, Olinda e Jaboatão dos Guararapes
               </p>
               <h1
                 className="font-display font-semibold tracking-tight text-[#171412] leading-[1.08] mb-3 sm:mb-5"
@@ -1156,23 +1202,35 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                           type="button"
                           onClick={() => setSelectedDate(q.date)}
                           className={`px-3 py-2 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-                            selectedDate === q.date
-                              ? 'bg-[#171412] text-white border-[#171412]'
-                              : 'bg-[#FAF9F7] text-[#575049] border-[#E6E2DC] hover:text-[#171412]'
+                            q.blockedReason
+                              ? 'bg-[#F3F1ED] text-[#9A9289] border-[#E6E2DC]'
+                              : selectedDate === q.date
+                                ? 'bg-[#171412] text-white border-[#171412]'
+                                : 'bg-[#FAF9F7] text-[#575049] border-[#E6E2DC] hover:text-[#171412]'
                           }`}
                         >
                           {q.label}
+                          {q.blockedReason ? ' (Fechado)' : ''}
                         </button>
                       ))}
                     </div>
                   </div>
                 </div>
 
+                {selectedDateBlockedReason && (
+                  <div className="mb-4 p-3.5 rounded-lg bg-[#991B1B]/5 border border-[#991B1B]/25 text-sm text-[#991B1B]">
+                    <p className="font-semibold">Data bloqueada para agendamentos</p>
+                    <p className="text-xs mt-0.5 text-[#575049]">
+                      {selectedDateBlockedReason} Selecione outra data disponível no calendário acima.
+                    </p>
+                  </div>
+                )}
+
                 {slotsError && (
                   <p className="text-sm text-[#DC2626] mb-3">{slotsError}</p>
                 )}
 
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
                   {availability?.slots.map((slot) => {
                     const isAvailable = slot.state === 'available';
                     const isSelected = selectedTime === slot.time;
@@ -1487,6 +1545,30 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                       <div className="p-3.5 rounded-lg bg-[#FAF9F7] border border-[#E6E2DC] text-xs text-[#575049]">
                         Analisando rota, relevo e calculando automaticamente o valor para o endereço...
                       </div>
+                    ) : addressPrice?.requiresWhatsappQuote ? (
+                      <div className="p-4 rounded-lg bg-[#16A34A]/5 border border-[#16A34A]/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div className="space-y-1">
+                          <p className="text-[#171412] font-semibold">
+                            Região fora de Recife, Olinda e Jaboatão dos Guararapes
+                          </p>
+                          <p className="text-[#575049]">
+                            Também realizamos homenagens em lugares mais distantes! Para{' '}
+                            <strong className="text-[#171412]">
+                              {addressPrice.resolvedCity || city || 'essa localidade'}
+                            </strong>
+                            , o orçamento e o deslocamento são combinados direto no WhatsApp.
+                          </p>
+                        </div>
+                        <a
+                          href={buildOutOfRegionWhatsappUrl()}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors whitespace-nowrap shrink-0"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          Orçamento no WhatsApp
+                        </a>
+                      </div>
                     ) : addressPrice ? (
                       <div className="p-3.5 rounded-lg bg-[#16A34A]/5 border border-[#16A34A]/25 flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="space-y-0.5">
@@ -1515,7 +1597,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                     ) : (
                       <div className="p-3.5 rounded-lg bg-[#FAF9F7] border border-[#E6E2DC] text-xs text-[#575049]">
                         {priceHint ||
-                          'Informe o CEP ou preencha a cidade, bairro e rua acima para calcular automaticamente o valor do pacote.'}
+                          'Agendamento online automático para Recife, Olinda e Jaboatão dos Guararapes. Para lugares mais distantes, também atendemos com orçamento direto no WhatsApp.'}
                       </div>
                     )}
                   </div>
@@ -1909,11 +1991,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 <div className="flex justify-between gap-2">
                   <span className="text-[#575049]">Pacote para o endereço</span>
                   <span className="font-mono text-[#171412] tabular-nums text-right">
-                    {addressPrice
-                      ? formatBRL(pricing.basePrice)
-                      : calculatingPrice
-                        ? 'Calculando...'
-                        : 'A calcular'}
+                    {addressPrice?.requiresWhatsappQuote
+                      ? 'Orçamento no Zap'
+                      : addressPrice
+                        ? formatBRL(pricing.basePrice)
+                        : calculatingPrice
+                          ? 'Calculando...'
+                          : 'A calcular'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1934,10 +2018,12 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 </div>
                 <div className="flex justify-between items-baseline pt-2 border-t border-[#E6E2DC]">
                   <span className="font-semibold text-[#171412]">Total previsto</span>
-                  <span className="font-mono text-2xl font-semibold text-[#991B1B] tabular-nums">
-                    {addressPrice
-                      ? formatBRL(pricing.totalPrice)
-                      : 'Informe o endereço'}
+                  <span className="font-mono text-xl sm:text-2xl font-semibold text-[#991B1B] tabular-nums text-right">
+                    {addressPrice?.requiresWhatsappQuote
+                      ? 'Combinar no WhatsApp'
+                      : addressPrice
+                        ? formatBRL(pricing.totalPrice)
+                        : 'Informe o endereço'}
                   </span>
                 </div>
               </div>
@@ -1976,17 +2062,29 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                 </p>
               )}
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="mt-5 w-full py-3.5 px-5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
-              >
-                {submitting
-                  ? 'Confirmando Reserva...'
-                  : user && user.emailVerified
-                    ? 'Confirmar Agendamento Automático'
-                    : 'Entrar / Registrar e Confirmar'}
-              </button>
+              {addressPrice?.requiresWhatsappQuote ? (
+                <a
+                  href={buildOutOfRegionWhatsappUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-5 w-full inline-flex items-center justify-center gap-2 py-3.5 px-5 text-sm font-semibold text-white bg-[#16A34A] hover:bg-[#15803D] rounded-lg transition-colors"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Solicitar Orçamento no WhatsApp
+                </a>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="mt-5 w-full py-3.5 px-5 text-sm font-semibold text-white bg-[#991B1B] hover:bg-[#7F1D1D] rounded-lg transition-colors disabled:opacity-60"
+                >
+                  {submitting
+                    ? 'Confirmando Reserva...'
+                    : user && user.emailVerified
+                      ? 'Confirmar Agendamento Automático'
+                      : 'Entrar / Registrar e Confirmar'}
+                </button>
+              )}
 
               {user && user.emailVerified ? (
                 <div className="mt-3 flex items-center justify-between text-xs text-[#575049]">
@@ -2213,7 +2311,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
               Desperte Corações
             </p>
             <p className="mt-1.5 leading-relaxed">
-              Carro de Mensagem ao Vivo em Recife e Região Metropolitana. Locução personalizada, música e emoção na porta de quem você ama.
+              Carro de Mensagem ao Vivo em Recife, Olinda e Jaboatão dos Guararapes. Para regiões mais distantes, fazemos orçamento direto pelo WhatsApp.
             </p>
           </div>
 

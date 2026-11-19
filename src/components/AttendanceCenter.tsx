@@ -31,9 +31,11 @@ import {
 } from '../types/booking';
 import {
   formatBRL,
+  getBlockedDateReason,
   GIFT_OPTIONS,
   NEIGHBORHOOD_ZONES,
   OCCASIONS,
+  STANDARD_TIME_SLOTS,
   TEMPLATE_CATEGORIES,
 } from '../constants/pricing';
 import { User } from 'firebase/auth';
@@ -1273,6 +1275,20 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                 </div>
               </div>
 
+              {(() => {
+                const holidayReason =
+                  scheduleAvailability?.blockedReason ??
+                  getBlockedDateReason(scheduleDate);
+                return holidayReason ? (
+                  <div className="p-4 rounded-xl bg-[#991B1B]/5 border border-[#991B1B]/25 text-sm text-[#991B1B]">
+                    <p className="font-semibold">Feriado bloqueado automaticamente</p>
+                    <p className="text-xs text-[#575049] mt-0.5">
+                      {holidayReason} Todos os horários desta data aparecem como indisponíveis para os clientes.
+                    </p>
+                  </div>
+                ) : null;
+              })()}
+
               <div className="bg-white border border-[#E6E2DC] rounded-xl divide-y divide-[#E6E2DC]">
                 {scheduleAvailability?.slots.map((slot) => {
                   const matchedBooking =
@@ -1342,9 +1358,15 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                         ) : (
                           <button
                             type="button"
-                            disabled={togglingSlot === slot.time}
+                            disabled={
+                              togglingSlot === slot.time ||
+                              Boolean(
+                                scheduleAvailability?.blockedReason ??
+                                  getBlockedDateReason(scheduleDate)
+                              )
+                            }
                             onClick={() => handleToggleSlot(slot.time)}
-                            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                               slot.state === 'blocked'
                                 ? 'bg-[#16A34A] text-white hover:bg-[#15803D]'
                                 : 'bg-[#FAF9F7] text-[#171412] border border-[#E6E2DC] hover:border-[#991B1B]'
@@ -1637,17 +1659,7 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                     onChange={(e) => setMTime(e.target.value)}
                     className="w-full px-3 py-2 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg font-mono"
                   >
-                    {[
-                      '09:00',
-                      '10:30',
-                      '12:00',
-                      '14:00',
-                      '15:30',
-                      '17:00',
-                      '18:00',
-                      '19:30',
-                      '21:00',
-                    ].map((t) => (
+                    {STANDARD_TIME_SLOTS.map((t) => (
                       <option key={t} value={t}>
                         {t}
                       </option>

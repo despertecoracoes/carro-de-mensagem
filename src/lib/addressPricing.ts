@@ -19,6 +19,7 @@ export interface AddressPriceResult {
   terrainReasons: string[];
   maxElevationM: number | null;
   elevationDeltaM: number | null;
+  requiresWhatsappQuote: boolean;
 }
 
 // Ponto de saída: Rua Rio Amazonas, S/N, Bloco 86G, Quadra 2 — Ipsep, Recife - PE
@@ -261,6 +262,81 @@ export function priceFromDistanceKm(km: number): number {
   if (km <= 21.5) return 350;
   const extra = Math.round(((km - 21.5) * 4.5) / 10) * 10;
   return Math.min(950, 350 + Math.max(10, extra));
+}
+
+const CORE_CITIES = ['recife', 'olinda', 'jaboatao', 'jaboatao dos guararapes'];
+
+const CORE_NEIGHBORHOOD_KEYWORDS = [
+  'ipsep',
+  'boa viagem',
+  'pina',
+  'imbiribeira',
+  'ibura',
+  'areias',
+  'afogados',
+  'sao jose',
+  'boa vista',
+  'madalena',
+  'torre',
+  'gracas',
+  'espinheiro',
+  'casa amarela',
+  'casa forte',
+  'varzea',
+  'iputinga',
+  'caxanga',
+  'piedade',
+  'candeias',
+  'prazeres',
+  'barra de jangada',
+  'cajueiro seco',
+  'jardim jordao',
+  'cavaleiro',
+  'sucupira',
+  'curado',
+  'bairro novo',
+  'casa caiada',
+  'rio doce',
+  'ouro preto',
+  'peixinhos',
+  'jardim atlantico',
+  'aguas compridas',
+  'aguazinha',
+  'bultrins',
+  'carmo',
+  'varadouro',
+  'ur-11',
+  'ur11',
+  'cohab',
+];
+
+function isCoreCoverageArea(
+  city: string,
+  neighborhood: string,
+  geoDisplayName?: string
+): boolean {
+  const normCity = normalizeText(city);
+  const normNeigh = normalizeText(neighborhood);
+  const normGeo = normalizeText(geoDisplayName ?? '');
+
+  if (normCity) {
+    if (CORE_CITIES.some((c) => normCity.includes(c))) {
+      return true;
+    }
+    return false;
+  }
+
+  if (normGeo) {
+    if (CORE_CITIES.some((c) => normGeo.includes(c))) {
+      return true;
+    }
+  }
+
+  if (normNeigh && CORE_NEIGHBORHOOD_KEYWORDS.some((kw) => normNeigh.includes(kw))) {
+    return true;
+  }
+
+  return false;
 }
 
 function matchCalibratedZone(
@@ -633,6 +709,7 @@ export async function calculateAddressPrice(input: {
     });
 
     const baseFromDistance = calibrated ? calibrated.price : routePrice;
+    const isCore = isCoreCoverageArea(city, neighborhood, geo.displayName);
     return {
       basePrice: baseFromDistance + terrainAdjustment,
       distanceKm,
@@ -644,6 +721,7 @@ export async function calculateAddressPrice(input: {
       terrainReasons,
       maxElevationM: terrain?.maxElevationM ?? null,
       elevationDeltaM: terrain?.elevationDeltaM ?? null,
+      requiresWhatsappQuote: !isCore,
     };
   }
 
@@ -654,6 +732,8 @@ export async function calculateAddressPrice(input: {
     terrain: null,
     accessCondition,
   });
+
+  const isCoreNoGeo = isCoreCoverageArea(city, neighborhood);
 
   if (calibrated) {
     return {
@@ -667,10 +747,11 @@ export async function calculateAddressPrice(input: {
       terrainReasons,
       maxElevationM: null,
       elevationDeltaM: null,
+      requiresWhatsappQuote: !isCoreNoGeo,
     };
   }
 
-  // Fallback seguro para endereços desconhecidos dentro de Recife
+  // Fallback seguro para endereços desconhecidos dentro de Recife / fora das cidades principais
   return {
     basePrice: 280 + terrainAdjustment,
     distanceKm: null,
@@ -682,5 +763,6 @@ export async function calculateAddressPrice(input: {
     terrainReasons,
     maxElevationM: null,
     elevationDeltaM: null,
+    requiresWhatsappQuote: !isCoreNoGeo,
   };
 }

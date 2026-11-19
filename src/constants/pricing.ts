@@ -2,15 +2,30 @@ import { GiftOption, OccasionType, TemplateCategory } from '../types/booking';
 
 export const STANDARD_TIME_SLOTS = [
   '09:00',
-  '10:30',
+  '10:00',
+  '11:00',
   '12:00',
+  '13:00',
   '14:00',
-  '15:30',
+  '15:00',
+  '16:00',
   '17:00',
   '18:00',
-  '19:30',
+  '19:00',
+  '20:00',
   '21:00',
 ];
+
+export const BLOCKED_HOLIDAY_MONTH_DAYS: Record<string, string> = {
+  '12-25': 'Natal (25/12) — não realizamos atendimentos nesta data.',
+  '12-31': 'Ano Novo (31/12) — não realizamos atendimentos nesta data.',
+};
+
+export function getBlockedDateReason(dateStr: string): string | null {
+  if (!dateStr || dateStr.length < 10) return null;
+  const monthDay = dateStr.slice(5, 10);
+  return BLOCKED_HOLIDAY_MONTH_DAYS[monthDay] ?? null;
+}
 
 export const OCCASIONS: {
   value: OccasionType;
