@@ -42,9 +42,13 @@ import {
   FIREWORKS_PRICE,
   formatBRL,
   getBlockedDateReason,
+  getBookingLeadTimeError,
+  getRecifeDateString,
+  getSlotCutoffReason,
   GIFT_OPTIONS,
   OCCASIONS,
   RESERVATION_DEPOSIT_BRL,
+  STANDARD_TIME_SLOTS,
 } from '../constants/pricing';
 import {
   AddressPriceResult,
@@ -94,6 +98,11 @@ const FAQ_ITEMS = [
     question: 'Os fogos de artifício são obrigatórios?',
     answer:
       'Não. Os 3 fogos (12x1, Chuva de Prata e Vulcão) já estão inclusos sem custo adicional, mas se o local tiver restrição ou você preferir sem fogos, é só desmarcar a opção na Etapa 3.',
+  },
+  {
+    question: 'Qual a antecedência mínima para agendar pelo site?',
+    answer:
+      'Para agendamentos automáticos no site, pedimos no mínimo 2 horas de antecedência (ex.: às 12h o site libera a partir das 14h), garantindo tempo para preparo e deslocamento a partir do Ipsep. Se precisar para antes de 2h, fale direto no WhatsApp para consultarmos encaixe.',
   },
   {
     question: 'E se chover ou precisar alterar o horário?',
@@ -190,21 +199,17 @@ function readSavedDraft(): BookingDraft {
   }
 }
 
-function getDateString(offsetDays = 0): string {
-  const base = new Date();
-  base.setDate(base.getDate() + offsetDays);
-  const year = base.getFullYear();
-  const month = String(base.getMonth() + 1).padStart(2, '0');
-  const day = String(base.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function getFirstOpenDateString(): string {
-  for (let i = 0; i < 7; i += 1) {
-    const candidate = getDateString(i);
-    if (!getBlockedDateReason(candidate)) return candidate;
+  const now = new Date();
+  for (let i = 0; i < 14; i += 1) {
+    const candidate = getRecifeDateString(i, now);
+    if (getBlockedDateReason(candidate)) continue;
+    const hasOpenSlot = STANDARD_TIME_SLOTS.some(
+      (slot) => getSlotCutoffReason(candidate, slot, now) === null
+    );
+    if (hasOpenSlot) return candidate;
   }
-  return getDateString(0);
+  return getRecifeDateString(1, now);
 }
 
 function formatDatePtBr(dateStr: string): string {
@@ -249,12 +254,21 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   );
   const [stepError, setStepError] = useState('');
 
-  const [selectedDate, setSelectedDate] = useState<string>(
-    () => initialDraft.selectedDate || getFirstOpenDateString()
-  );
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const today = getRecifeDateString(0);
+    if (
+      initialDraft.selectedDate &&
+      initialDraft.selectedDate >= today &&
+      !getBlockedDateReason(initialDraft.selectedDate)
+    ) {
+      return initialDraft.selectedDate;
+    }
+    return getFirstOpenDateString();
+  });
   const [selectedTime, setSelectedTime] = useState<string>(
     () => initialDraft.selectedTime || ''
   );
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState('');
@@ -402,18 +416,39 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     messageTone,
   ]);
 
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTime) return;
+    if (getSlotCutoffReason(selectedDate, selectedTime, new Date(nowTick)) !== null) {
+      setSelectedTime('');
+    }
+  }, [selectedDate, selectedTime, nowTick]);
+
+  const todayRecife = useMemo(
+    () => getRecifeDateString(0, new Date(nowTick)),
+    [nowTick]
+  );
+
   const quickDates = useMemo(
-    () =>
-      [
-        { label: 'Hoje', date: getDateString(0) },
-        { label: 'Amanhã', date: getDateString(1) },
-        { label: 'Em 2 dias', date: getDateString(2) },
-        { label: 'Próxima semana', date: getDateString(7) },
+    () => {
+      const refNow = new Date(nowTick);
+      return [
+        { label: 'Hoje', date: getRecifeDateString(0, refNow) },
+        { label: 'Amanhã', date: getRecifeDateString(1, refNow) },
+        { label: 'Em 2 dias', date: getRecifeDateString(2, refNow) },
+        { label: 'Próxima semana', date: getRecifeDateString(7, refNow) },
       ].map((item) => ({
         ...item,
         blockedReason: getBlockedDateReason(item.date),
-      })),
-    []
+      }));
+    },
+    [nowTick]
   );
 
   const selectedDateBlockedReason = useMemo(
@@ -429,9 +464,9 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setAvailability(res);
       setSelectedTime((prev) => {
         if (!prev) return '';
-        const stillOpen = res.slots.some(
-          (s) => s.time === prev && s.state === 'available'
-        );
+        const stillOpen =
+          res.slots.some((s) => s.time === prev && s.state === 'available') &&
+          getSlotCutoffReason(dateToLoad, prev) === null;
         return stillOpen ? prev : '';
       });
     } catch (err) {
@@ -453,9 +488,9 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
         setLoadingSlots(false);
         setSelectedTime((prev) => {
           if (!prev) return '';
-          const stillOpen = res.slots.some(
-            (s) => s.time === prev && s.state === 'available'
-          );
+          const stillOpen =
+            res.slots.some((s) => s.time === prev && s.state === 'available') &&
+            getSlotCutoffReason(selectedDate, prev) === null;
           return stillOpen ? prev : '';
         });
       },
@@ -677,6 +712,11 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       if (!selectedTime) {
         return 'Escolha um horário disponível antes de avançar.';
       }
+      const leadTimeError = getBookingLeadTimeError(selectedDate, selectedTime);
+      if (leadTimeError) {
+        setSelectedTime('');
+        return leadTimeError;
+      }
     }
     if (
       stepIdx === 1 &&
@@ -735,6 +775,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     if (!selectedTime) {
       setCurrentStep(0);
       setSubmitError('Escolha um horário disponível na etapa 01.');
+      return;
+    }
+    const leadTimeError = getBookingLeadTimeError(selectedDate, selectedTime);
+    if (leadTimeError) {
+      setCurrentStep(0);
+      setSelectedTime('');
+      setSubmitError(leadTimeError);
       return;
     }
     if (!honoreeName.trim() || !clientName.trim() || !clientWhatsapp.trim()) {
@@ -1400,7 +1447,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                       id="booking-date"
                       type="date"
                       value={selectedDate}
-                      min={getDateString(0)}
+                      min={todayRecife}
                       onChange={(e) => setSelectedDate(e.target.value)}
                       className="w-full px-3.5 py-2.5 text-sm bg-[#FAF9F7] border border-[#E6E2DC] rounded-lg focus:outline-none focus:border-[#991B1B]"
                       required
@@ -1441,14 +1488,64 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                   </div>
                 )}
 
+                {!selectedDateBlockedReason && selectedDate === todayRecife && (
+                  <div className="mb-4 p-3 rounded-lg bg-[#FAF9F7] border border-[#E6E2DC] text-xs text-[#575049] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span>
+                      {availability &&
+                      !availability.slots.some(
+                        (s) =>
+                          s.state === 'available' &&
+                          getSlotCutoffReason(selectedDate, s.time, new Date(nowTick)) ===
+                            null
+                      ) ? (
+                        <>
+                          <strong className="text-[#171412]">
+                            Horários automáticos de hoje encerrados:
+                          </strong>{' '}
+                          exigimos no mínimo 2h de antecedência. Selecione{' '}
+                          <strong className="text-[#171412]">Amanhã</strong> ou
+                          consulte encaixe no WhatsApp.
+                        </>
+                      ) : (
+                        <>
+                          <strong className="text-[#171412]">
+                            Prazo mínimo de 2 horas:
+                          </strong>{' '}
+                          para preparo e saída do Ipsep, agendamentos automáticos
+                          liberam a partir de 2h após o horário atual.
+                        </>
+                      )}
+                    </span>
+                    <a
+                      href={buildCompanyWhatsappUrl(
+                        'Olá! Gostaria de consultar se há encaixe para homenagem hoje com menos de 2 horas de antecedência.'
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-[#16A34A] hover:underline whitespace-nowrap shrink-0"
+                    >
+                      Consultar encaixe no WhatsApp
+                    </a>
+                  </div>
+                )}
+
                 {slotsError && (
                   <p className="text-sm text-[#DC2626] mb-3">{slotsError}</p>
                 )}
 
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
                   {availability?.slots.map((slot) => {
-                    const isAvailable = slot.state === 'available';
-                    const isSelected = selectedTime === slot.time;
+                    const cutoffReason =
+                      slot.state === 'available'
+                        ? getSlotCutoffReason(
+                            selectedDate,
+                            slot.time,
+                            new Date(nowTick)
+                          )
+                        : null;
+                    const isAvailable =
+                      slot.state === 'available' && cutoffReason === null;
+                    const isSelected = selectedTime === slot.time && isAvailable;
                     return (
                       <button
                         key={slot.time}
@@ -1478,11 +1575,15 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                                 : 'text-[#9A9289]'
                           }`}
                         >
-                          {slot.state === 'available'
+                          {isAvailable
                             ? 'Disponível'
                             : slot.state === 'booked'
                               ? 'Reservado'
-                              : 'Indisponível'}
+                              : cutoffReason === 'past'
+                                ? 'Encerrado'
+                                : cutoffReason === 'lead_time'
+                                  ? 'Mín. 2h antes'
+                                  : 'Indisponível'}
                         </p>
                       </button>
                     );

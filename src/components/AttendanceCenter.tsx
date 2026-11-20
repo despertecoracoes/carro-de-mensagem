@@ -33,6 +33,8 @@ import {
 import {
   formatBRL,
   getBlockedDateReason,
+  getRecifeDateString,
+  getSlotCutoffReason,
   GIFT_OPTIONS,
   NEIGHBORHOOD_ZONES,
   OCCASIONS,
@@ -70,11 +72,7 @@ type WorkspaceTab =
   | 'settings';
 
 function getTodayStr(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return getRecifeDateString(0);
 }
 
 function formatDatePtBr(dateStr: string): string {
@@ -1436,11 +1434,32 @@ export const AttendanceCenter: React.FC<AttendanceCenterProps> = ({
                           {slot.time}
                         </span>
                         <div>
-                          {slot.state === 'available' && (
-                            <p className="text-sm font-medium text-[#16A34A]">
-                              Disponível no site online
-                            </p>
-                          )}
+                          {slot.state === 'available' &&
+                            (() => {
+                              const cutoff = getSlotCutoffReason(
+                                scheduleDate,
+                                slot.time
+                              );
+                              if (cutoff === 'past') {
+                                return (
+                                  <p className="text-sm font-medium text-[#575049]">
+                                    Horário já encerrado no site público
+                                  </p>
+                                );
+                              }
+                              if (cutoff === 'lead_time') {
+                                return (
+                                  <p className="text-sm font-medium text-[#D97706]">
+                                    Fechado no site (&lt; 2h de antecedência · apenas encaixe manual)
+                                  </p>
+                                );
+                              }
+                              return (
+                                <p className="text-sm font-medium text-[#16A34A]">
+                                  Disponível no site online
+                                </p>
+                              );
+                            })()}
                           {slot.state === 'blocked' && (
                             <p className="text-sm font-medium text-[#575049]">
                               Bloqueado manualmente pela empresa

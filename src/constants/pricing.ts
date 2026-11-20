@@ -16,6 +16,9 @@ export const STANDARD_TIME_SLOTS = [
   '21:00',
 ];
 
+export const RECIFE_TIMEZONE = 'America/Recife';
+export const MIN_BOOKING_LEAD_MINUTES = 120; // 2 horas de antecedência mínima
+
 export const BLOCKED_HOLIDAY_MONTH_DAYS: Record<string, string> = {
   '12-25': 'Natal (25/12) — não realizamos atendimentos nesta data.',
   '12-31': 'Ano Novo (31/12) — não realizamos atendimentos nesta data.',
@@ -25,6 +28,90 @@ export function getBlockedDateReason(dateStr: string): string | null {
   if (!dateStr || dateStr.length < 10) return null;
   const monthDay = dateStr.slice(5, 10);
   return BLOCKED_HOLIDAY_MONTH_DAYS[monthDay] ?? null;
+}
+
+export function getRecifeNowParts(referenceDate = new Date()): {
+  date: string;
+  time: string;
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+} {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: RECIFE_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = formatter.formatToParts(referenceDate);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const year = Number(get('year'));
+  const month = Number(get('month'));
+  const day = Number(get('day'));
+  const hour = Number(get('hour')) % 24;
+  const minute = Number(get('minute'));
+  const date = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return { date, time, year, month, day, hour, minute };
+}
+
+export function getRecifeDateString(
+  offsetDays = 0,
+  referenceDate = new Date()
+): string {
+  const now = getRecifeNowParts(referenceDate);
+  const utcDate = new Date(Date.UTC(now.year, now.month - 1, now.day + offsetDays));
+  const y = utcDate.getUTCFullYear();
+  const m = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(utcDate.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getSlotCutoffReason(
+  dateStr: string,
+  timeStr: string,
+  referenceDate = new Date()
+): 'past' | 'lead_time' | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || !/^\d{2}:\d{2}$/.test(timeStr)) {
+    return 'past';
+  }
+  const [sYear, sMonth, sDay] = dateStr.split('-').map(Number);
+  const [sHour, sMinute] = timeStr.split(':').map(Number);
+  const now = getRecifeNowParts(referenceDate);
+
+  const slotUtcMs = Date.UTC(sYear, sMonth - 1, sDay, sHour, sMinute);
+  const nowUtcMs = Date.UTC(
+    now.year,
+    now.month - 1,
+    now.day,
+    now.hour,
+    now.minute
+  );
+  const diffMinutes = Math.floor((slotUtcMs - nowUtcMs) / 60000);
+
+  if (diffMinutes <= 0) return 'past';
+  if (diffMinutes < MIN_BOOKING_LEAD_MINUTES) return 'lead_time';
+  return null;
+}
+
+export function getBookingLeadTimeError(
+  dateStr: string,
+  timeStr: string,
+  referenceDate = new Date()
+): string | null {
+  const reason = getSlotCutoffReason(dateStr, timeStr, referenceDate);
+  if (reason === 'past') {
+    return 'Esse horário já passou. Escolha um horário futuro disponível.';
+  }
+  if (reason === 'lead_time') {
+    return 'Agendamentos automáticos pelo site exigem no mínimo 2 horas de antecedência (preparo e trajeto a partir do Ipsep). Escolha um horário mais tarde ou consulte encaixe no WhatsApp.';
+  }
+  return null;
 }
 
 export const OCCASIONS: {

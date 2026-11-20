@@ -27,6 +27,7 @@ import {
 import {
   calculatePrices,
   getBlockedDateReason,
+  getBookingLeadTimeError,
   RESERVATION_DEPOSIT_BRL,
   STANDARD_TIME_SLOTS,
 } from '../constants/pricing';
@@ -277,6 +278,13 @@ export async function createBookingApi(payload: {
   const blockedReason = getBlockedDateReason(payload.date);
   if (blockedReason) {
     throw new Error(`Data indisponível: ${blockedReason}`);
+  }
+
+  if (!isAdminUser(user)) {
+    const leadTimeError = getBookingLeadTimeError(payload.date, payload.time);
+    if (leadTimeError) {
+      throw new Error(leadTimeError);
+    }
   }
 
   const slotId = makeSlotId(payload.date, payload.time);
