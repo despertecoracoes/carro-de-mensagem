@@ -109,7 +109,7 @@ export function getBookingLeadTimeError(
     return 'Esse horário já passou. Escolha um horário futuro disponível.';
   }
   if (reason === 'lead_time') {
-    return 'Agendamentos automáticos pelo site exigem no mínimo 2 horas de antecedência (preparo e trajeto a partir do Ipsep). Escolha um horário mais tarde ou consulte encaixe no WhatsApp.';
+    return 'Agendamentos automáticos pelo site exigem no mínimo 2 horas de antecedência. Escolha um horário mais tarde ou consulte encaixe no WhatsApp.';
   }
   return null;
 }

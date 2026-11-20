@@ -102,7 +102,7 @@ const FAQ_ITEMS = [
   {
     question: 'Qual a antecedência mínima para agendar pelo site?',
     answer:
-      'Para agendamentos automáticos no site, pedimos no mínimo 2 horas de antecedência (ex.: às 12h o site libera a partir das 14h), garantindo tempo para preparo e deslocamento a partir do Ipsep. Se precisar para antes de 2h, fale direto no WhatsApp para consultarmos encaixe.',
+      'Para agendamentos automáticos no site, pedimos no mínimo 2 horas de antecedência (ex.: às 12h o site libera a partir das 14h). Se precisar para antes de 2h, fale direto no WhatsApp para consultarmos encaixe.',
   },
   {
     question: 'E se chover ou precisar alterar o horário?',
@@ -1509,10 +1509,9 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
                       ) : (
                         <>
                           <strong className="text-[#171412]">
-                            Prazo mínimo de 2 horas:
+                            Prazo mínimo de 2 horas de antecedência
                           </strong>{' '}
-                          para preparo e saída do Ipsep, agendamentos automáticos
-                          liberam a partir de 2h após o horário atual.
+                          para agendamentos hoje.
                         </>
                       )}
                     </span>
