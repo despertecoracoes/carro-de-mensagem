@@ -306,6 +306,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [priceHint, setPriceHint] = useState('');
   const latestCalcIdRef = useRef(0);
+  const wizardTopRef = useRef<HTMLDivElement | null>(null);
 
   const [giftOption, setGiftOption] = useState<GiftOption>(
     () => initialDraft.giftOption || 'champanhe'
@@ -739,10 +740,22 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     return null;
   };
 
+  const scrollWizardToTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        wizardTopRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
+    });
+  }, []);
+
   const handleGoToStep = (targetStep: number) => {
     setStepError('');
     setSubmitError('');
     setCurrentStep(Math.max(0, Math.min(4, targetStep)));
+    scrollWizardToTop();
   };
 
   const handleNextStep = () => {
@@ -754,12 +767,14 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     setStepError('');
     setSubmitError('');
     setCurrentStep((prev) => Math.min(4, prev + 1));
+    scrollWizardToTop();
   };
 
   const handlePrevStep = () => {
     setStepError('');
     setSubmitError('');
     setCurrentStep((prev) => Math.max(0, prev - 1));
+    scrollWizardToTop();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -770,11 +785,13 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     if (selectedDateBlockedReason) {
       setCurrentStep(0);
       setSubmitError(`Data indisponível: ${selectedDateBlockedReason} Escolha outra data.`);
+      scrollWizardToTop();
       return;
     }
     if (!selectedTime) {
       setCurrentStep(0);
       setSubmitError('Escolha um horário disponível na etapa 01.');
+      scrollWizardToTop();
       return;
     }
     const leadTimeError = getBookingLeadTimeError(selectedDate, selectedTime);
@@ -782,6 +799,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setCurrentStep(0);
       setSelectedTime('');
       setSubmitError(leadTimeError);
+      scrollWizardToTop();
       return;
     }
     if (!honoreeName.trim() || !clientName.trim() || !clientWhatsapp.trim()) {
@@ -789,6 +807,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setSubmitError(
         'Preencha o nome do homenageado, seu nome e seu WhatsApp na etapa 02.'
       );
+      scrollWizardToTop();
       return;
     }
     if (!neighborhood.trim() || !streetAddress.trim()) {
@@ -796,6 +815,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setSubmitError(
         'Informe o bairro, a rua e o número do endereço na etapa 03 para calcular o valor.'
       );
+      scrollWizardToTop();
       return;
     }
     if (!song1.trim() || !song2.trim() || !song3.trim()) {
@@ -803,6 +823,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setSubmitError(
         'Preencha os nomes das 3 músicas que devem tocar no carro na etapa 04.'
       );
+      scrollWizardToTop();
       return;
     }
     if (messageSource === 'cliente' && !customMessage.trim()) {
@@ -810,6 +831,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       setSubmitError(
         'Digite o texto da mensagem ou selecione para a empresa gerar na etapa 05.'
       );
+      scrollWizardToTop();
       return;
     }
     if (!lgpdAccepted) {
@@ -882,6 +904,12 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       }
       onBookingCreated(booking);
       await loadSlots(selectedDate);
+      requestAnimationFrame(() => {
+        document.getElementById('agendar')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : 'Não foi possível concluir a reserva.'
@@ -898,6 +926,12 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
     setStepError('');
     setSubmitError('');
     setSelectedTime('');
+    requestAnimationFrame(() => {
+      document.getElementById('agendar')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
     setHonoreeName('');
     setHonoreeAge('');
     setCep('');
@@ -1193,7 +1227,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
       {/* Interactive Online Automatic Booking */}
       <section
         id="agendar"
-        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-8 sm:py-12 border-t border-[#E6E2DC]"
+        className="max-w-[1280px] mx-auto px-4 sm:px-8 py-8 sm:py-12 border-t border-[#E6E2DC] scroll-mt-24 sm:scroll-mt-20"
       >
         <div className="mb-5 sm:mb-8">
           <h2 className="font-display text-xl sm:text-3xl font-semibold text-[#171412] tracking-tight">
@@ -1358,7 +1392,10 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
             className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
           >
             {/* Multi-Step Slide Wizard */}
-            <div className="lg:col-span-8 bg-white border border-[#E6E2DC] rounded-xl p-4 sm:p-8 flex flex-col justify-between">
+            <div
+              ref={wizardTopRef}
+              className="lg:col-span-8 bg-white border border-[#E6E2DC] rounded-xl p-4 sm:p-8 flex flex-col justify-between scroll-mt-24 sm:scroll-mt-20"
+            >
               {/* Slide Stepper Header */}
               <div className="mb-5 pb-4 border-b border-[#E6E2DC]">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -2268,7 +2305,7 @@ export const BookingSite: React.FC<BookingSiteProps> = ({
             {/* Sticky Summary Sidebar */}
             <aside
               id="booking-summary"
-              className="lg:col-span-4 lg:sticky lg:top-24 bg-white border border-[#E6E2DC] rounded-xl p-6"
+              className="lg:col-span-4 lg:sticky lg:top-24 bg-white border border-[#E6E2DC] rounded-xl p-6 scroll-mt-24 sm:scroll-mt-20"
             >
               <h3 className="font-display text-xl font-semibold text-[#171412] mb-4">
                 Resumo da Homenagem
